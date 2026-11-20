@@ -19,20 +19,46 @@ export class ApiError extends Error {
 
 type CsrfTokenProvider = () => string | null
 type UnauthorizedHandler = () => void
+type CsrfRefresher = () => Promise<void>
+
+/** Problem type the API uses when it refuses a request for a missing or stale anti-CSRF token. */
+export const CSRF_PROBLEM_TYPE = 'urn:photo-manager:problem:csrf'
 
 let csrfTokenProvider: CsrfTokenProvider = () => null
 let onUnauthorized: UnauthorizedHandler = () => {}
+let csrfRefresher: CsrfRefresher = () => Promise.resolve()
+let pendingCsrfRefresh: Promise<void> | null = null
 
 /**
  * Wires the HTTP layer to the auth store without a circular import: the store supplies the CSRF token
- * (kept in memory only, never in localStorage) and reacts when the session has expired.
+ * (kept in memory only, never in localStorage), fetches a fresh one when the API rejects a stale one, and
+ * reacts when the session has expired.
  */
 export function configureHttp(options: {
   csrfToken: CsrfTokenProvider
   unauthorized: UnauthorizedHandler
+  refreshCsrf?: CsrfRefresher
 }) {
   csrfTokenProvider = options.csrfToken
   onUnauthorized = options.unauthorized
+  csrfRefresher = options.refreshCsrf ?? (() => Promise.resolve())
+}
+
+/** Fetches a fresh anti-CSRF token; concurrent callers share one request. */
+export function refreshCsrfToken(): Promise<void> {
+  pendingCsrfRefresh ??= csrfRefresher().finally(() => {
+    pendingCsrfRefresh = null
+  })
+  return pendingCsrfRefresh
+}
+
+/** True when the API refused a request because its anti-CSRF token was missing or stale. */
+export function isCsrfProblem(problem: unknown): boolean {
+  return (
+    typeof problem === 'object' &&
+    problem !== null &&
+    (problem as ProblemDetails).type === CSRF_PROBLEM_TYPE
+  )
 }
 
 /** Returns the current CSRF token for callers that build requests themselves (XHR uploads). */
@@ -56,26 +82,17 @@ export interface RequestOptions {
  * HttpOnly, so scripts never see it. Mutating requests carry the anti-CSRF header.
  */
 export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const method = options.method ?? 'GET'
-  const headers = new Headers({ Accept: 'application/json' })
-  if (options.body !== undefined) {
-    headers.set('Content-Type', 'application/json')
+  let response = await send(path, options)
+  if (
+    response.status === 403 &&
+    (options.method ?? 'GET') !== 'GET' &&
+    (await isCsrfRejection(response))
+  ) {
+    // The anti-CSRF token went stale (for example after signing in again in another tab): fetch a fresh one and
+    // retry once. A second rejection is reported like any other error.
+    await refreshCsrfToken()
+    response = await send(path, options)
   }
-
-  if (method !== 'GET') {
-    const token = csrfTokenProvider()
-    if (token) {
-      headers.set('X-CSRF-TOKEN', token)
-    }
-  }
-
-  const response = await fetch(path, {
-    method,
-    headers,
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
-    credentials: 'same-origin',
-    signal: options.signal,
-  })
 
   if (response.status === 401) {
     onUnauthorized()
@@ -94,6 +111,37 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
 
   const text = await response.text()
   return (text ? JSON.parse(text) : undefined) as T
+}
+
+function send(path: string, options: RequestOptions): Promise<Response> {
+  const method = options.method ?? 'GET'
+  const headers = new Headers({ Accept: 'application/json' })
+  if (options.body !== undefined) {
+    headers.set('Content-Type', 'application/json')
+  }
+
+  if (method !== 'GET') {
+    const token = csrfTokenProvider()
+    if (token) {
+      headers.set('X-CSRF-TOKEN', token)
+    }
+  }
+
+  return fetch(path, {
+    method,
+    headers,
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    credentials: 'same-origin',
+    signal: options.signal,
+  })
+}
+
+async function isCsrfRejection(response: Response): Promise<boolean> {
+  try {
+    return isCsrfProblem(await response.clone().json())
+  } catch {
+    return false
+  }
 }
 
 /** Converts an error response into an {@link ApiError} with the most helpful user-safe message available. */

@@ -23,15 +23,16 @@ public sealed class DescribeActivities(
     TimeProvider time)
 {
     /// <summary>Describes a staged upload before it is encrypted into the archive.</summary>
-    /// <param name="photoId">The photo.</param>
+    /// <param name="input">The photo and the hash its inspection computed.</param>
     /// <returns>The description (embedded into the archive file by the next step).</returns>
     [Activity("DescribeStagedUpload")]
-    public async Task<DescribeResult> DescribeStagedUploadAsync(Guid photoId)
+    public async Task<DescribeResult> DescribeStagedUploadAsync(StagedUploadInput input)
     {
+        ArgumentNullException.ThrowIfNull(input);
         var ct = ActivityExecutionContext.Current.CancellationToken;
         try
         {
-            using var image = await loader.LoadStagedAsync(photoId, ct);
+            using var image = await loader.LoadStagedAsync(input.PhotoId, input.ExpectedSha256, ct);
             return await DescribeAsync(image, ct);
         }
         catch (Exception ex) when (ActivityErrors.TryTranslate(ex, out var failure))

@@ -35,21 +35,30 @@ app.use(VueQueryPlugin, { queryClient })
 
 const auth = useAuthStore()
 
-// When a session ends (sign-out or expiry), nothing of the previous user's may linger in memory: cached photo
-// data is dropped and queued uploads are cancelled.
+// When a session ends (sign-out, expiry, or in another tab), nothing of the previous user's may linger in
+// memory: cached photo data is dropped, queued uploads are cancelled, and a page that needs a session is left
+// for the sign-in page.
 auth.onSessionEnded(() => {
   queryClient.clear()
   useUploadsStore().reset()
+  const current = router.currentRoute.value
+  if (!current.meta.public) {
+    void router.push({ name: 'login', query: { returnUrl: current.fullPath } })
+  }
 })
 
 configureHttp({
   csrfToken: () => auth.csrfToken,
-  unauthorized: () => {
-    if (auth.isAuthenticated) {
-      auth.clear()
-      void router.push({ name: 'login', query: { returnUrl: router.currentRoute.value.fullPath } })
-    }
-  },
+  unauthorized: () => auth.clear(),
+  refreshCsrf: () => auth.refresh(),
+})
+
+// A tab coming back to the foreground re-checks the session (it may have expired, or ended in a tab that was
+// closed meanwhile) and picks up a fresh anti-CSRF token.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && auth.isAuthenticated) {
+    void auth.refresh()
+  }
 })
 
 app.use(router)

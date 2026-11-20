@@ -10,6 +10,12 @@ namespace PhotoManager.Api.Auth;
 /// <summary>GitHub OAuth sign-in with an allowlist, cookie sessions and antiforgery.</summary>
 public static class AuthenticationSetup
 {
+    /// <summary>Path GitHub redirects back to after sign-in; handled inside the authentication middleware.</summary>
+    public const string CallbackPath = "/signin-github";
+
+    internal const string ClearSiteDataHeader = "Clear-Site-Data";
+    internal const string ClearCacheDirective = "\"cache\"";
+
     /// <summary>
     /// Registers authentication. Why the app runs its own OAuth flow instead of Container Apps' built-in auth:
     /// it behaves identically in local development and tests, and the allowlist plus session rules live in
@@ -70,6 +76,7 @@ public static class AuthenticationSetup
                     {
                         context.RejectPrincipal();
                         await context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                        context.HttpContext.Response.Headers[ClearSiteDataHeader] = ClearCacheDirective;
                     }
                 };
             })
@@ -78,7 +85,7 @@ public static class AuthenticationSetup
                 var auth = configuration.GetSection(AuthOptions.SectionName).Get<AuthOptions>() ?? new AuthOptions();
                 options.ClientId = auth.GitHubClientId ?? string.Empty;
                 options.ClientSecret = auth.GitHubClientSecret ?? string.Empty;
-                options.CallbackPath = "/signin-github";
+                options.CallbackPath = CallbackPath;
                 options.UsePkce = true;
                 options.SaveTokens = false;
 
@@ -130,7 +137,11 @@ public static class AuthenticationSetup
 
         services.AddAntiforgery(options =>
         {
+            // The token is only ever accepted from the header. Without this, a request lacking the header would make
+            // antiforgery read the whole form body looking for a token field: for an upload, buffering up to the
+            // request size limit of plaintext photo to a temporary file before the request is refused.
             options.HeaderName = AntiforgeryValidationFilter.HeaderName;
+            options.SuppressReadingTokenFromFormBody = true;
             options.Cookie.Name = $"{cookiePrefix}pm-csrf";
             options.Cookie.SameSite = SameSiteMode.Strict;
             options.Cookie.SecurePolicy = secure ? CookieSecurePolicy.Always : CookieSecurePolicy.SameAsRequest;

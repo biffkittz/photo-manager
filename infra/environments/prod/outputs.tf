@@ -27,7 +27,7 @@ output "key_vaults" {
 
 output "managed_identities" {
   description = "Client ids of the app identities."
-  value       = { for tier, identity in azurerm_user_assigned_identity.app : tier => identity.client_id }
+  value       = { for tier, identity in data.azurerm_user_assigned_identity.app : tier => identity.client_id }
 }
 
 output "postgres_fqdn" {

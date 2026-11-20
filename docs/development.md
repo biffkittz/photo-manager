@@ -99,7 +99,7 @@ worker health http://localhost:8081/healthz.
 |---|---|---|
 | Core (crypto, protect.ps1 compatibility, domain) | `cd app/backend && dotnet test --project tests/PhotoManager.Core.Tests` | Fixtures in `TestData/Legacy` were produced by the real `protect.ps1` code (`generate-vectors.ps1`) |
 | Worker (workflows, codec, sanitizers) | `dotnet test --project tests/PhotoManager.Worker.Tests` | Temporal time-skipping test server (downloaded on first run) |
-| API (auth, CSRF, headers, uploads, search) | `dotnet test --project tests/PhotoManager.Api.Tests` | Needs Docker (Testcontainers PostgreSQL) |
+| API (auth, CSRF, headers, uploads, search) | `dotnet test --project tests/PhotoManager.Api.Tests` | Needs Docker (Testcontainers PostgreSQL). The API runs as a web-tier database role with the migrator's real grants, so a test fails if the web tier needs a privilege it does not have in production |
 | End to end | `PHOTOMANAGER_INTEGRATION=1 dotnet test --project tests/PhotoManager.IntegrationTests` | Needs `docker compose up -d` and `.env`; add `PHOTOMANAGER_INTEGRATION_EXTERNAL_WORKER=1` to exercise the worker container |
 | Frontend unit | `cd app/frontend && npm run test:unit` | Vitest (Jest-compatible API) + Vue Test Utils |
 | Frontend E2E + accessibility | `npm run test:e2e` | Playwright against the production build served with the production CSP; axe-core WCAG 2.1 AA checks. First run: `npx playwright install chromium` |

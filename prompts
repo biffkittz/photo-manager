@@ -1,3 +1,5 @@
+I want you to do
+
 Your goal is to build an easily deployable containerized web app (Vue 3 frontend and .net core backend) that integrates with Wasabi storage and Temporal workers to manage photos. One app view should allow the user to view and download existing photos from the bucket in the browser. Another page should manage bulk photo uploads and potentially other actions (which will create work for the Temporal workers). When images are uploaded from the app, an image-processing LLM integration using Gemini should read the image before encryption and assign a description to the photo based on its content (e.g. `woman and boy smiling on the beach`). The LLM calls and encryption work all happen on Temporal workers.
 
 The web app will be available at `photo.biffkittz.com` (DNS hosted by Cloudflare) and should be deployed as an Azure Container App in centralus. The worker containers should be hosted in ACA as well. You should store secrets in Key Vault. The web app should integrate with GitHub for login.
@@ -12,7 +14,7 @@ The Wasabi account and `photo-bk` bucket already exist -- the `photo-bk` bucket 
 
 You must provide detailed documentation on how to build and deploy the (frontend/backend) projects. For example,
   you should create a script called buildAndRunSite.sh that builds the frontend and backend projects,
-  combines the two (e.g. package frontend resources and combine with backend to be served by 
+  combines the two (e.g. package frontend resources and combine with backend to be served by
   a web server), and runs the site locally.
 
 You must provide detailed documentation on how to set up the development environment

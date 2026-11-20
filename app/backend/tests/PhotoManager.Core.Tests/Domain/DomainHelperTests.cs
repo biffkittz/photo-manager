@@ -64,6 +64,9 @@ public sealed class DomainHelperTests
     [InlineData("  bad<>:\"|?*name.png  ", "badname.png")]
     [InlineData("line\r\nbreak.jpg", "linebreak.jpg")]
     [InlineData("...", "photo")]
+    [InlineData(".. ..", "photo")]
+    [InlineData("photo. .", "photo")]
+    [InlineData(". .jpg", "jpg")]
     [InlineData(null, "photo")]
     public void Sanitizes_untrusted_file_names(string? input, string expected)
     {
@@ -74,5 +77,43 @@ public sealed class DomainHelperTests
     public void Limits_file_name_length()
     {
         Assert.Equal(FileNames.MaxLength, FileNames.Sanitize(new string('a', 1000) + ".jpg").Length);
+
+        var surrogateEdge = FileNames.Sanitize(new string('a', FileNames.MaxLength - 1) + "\U0001F4F7");
+        Assert.Equal(FileNames.MaxLength - 1, surrogateEdge.Length);
+        Assert.False(char.IsHighSurrogate(surrogateEdge[^1]));
+
+        var withWebp = FileNames.WithExtension(FileNames.Sanitize(new string('a', 250)), ".webp");
+        Assert.Equal(FileNames.MaxLength, withWebp.Length);
+        Assert.EndsWith(".webp", withWebp, StringComparison.Ordinal);
+
+        var surrogateWithExt = FileNames.WithExtension(new string('a', FileNames.MaxLength - 6) + "\U0001F4F7.png", ".webp");
+        Assert.Equal(FileNames.MaxLength - 1, surrogateWithExt.Length);
+        Assert.EndsWith(".webp", surrogateWithExt, StringComparison.Ordinal);
+        Assert.False(char.IsHighSurrogate(surrogateWithExt[FileNames.MaxLength - 7]));
+
+        var trailingSpaceTruncated = FileNames.WithExtension(new string('a', FileNames.MaxLength - 6) + " .png", ".webp");
+        Assert.Equal(new string('a', FileNames.MaxLength - 6) + ".webp", trailingSpaceTruncated);
+
+        var longJpeg = FileNames.WithExtension(new string('a', 250) + ".jpeg", ".jpg");
+        Assert.Equal(FileNames.MaxLength, longJpeg.Length);
+        Assert.EndsWith(".jpeg", longJpeg, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Archive_keys_only_belong_to_the_photo_they_were_written_for()
+    {
+        var photo = Guid.NewGuid();
+        var other = Guid.NewGuid();
+        var uploadedAt = new DateTimeOffset(2026, 11, 20, 12, 0, 0, TimeSpan.Zero);
+
+        Assert.True(ArchiveObjectKeys.BelongsTo(ArchiveObjectKeys.ForV2(photo, uploadedAt), photo, EncryptionFormat.V2));
+        Assert.True(ArchiveObjectKeys.BelongsTo("2019-07-04/IMG_0001.jpg.encrypted", photo, EncryptionFormat.LegacyV1));
+
+        // Another photo's v2 file, a format that does not match the record, and objects that are not archive files.
+        Assert.False(ArchiveObjectKeys.BelongsTo(ArchiveObjectKeys.ForV2(other, uploadedAt), photo, EncryptionFormat.V2));
+        Assert.False(ArchiveObjectKeys.BelongsTo(ArchiveObjectKeys.ForV2(photo, uploadedAt), photo, EncryptionFormat.LegacyV1));
+        Assert.False(ArchiveObjectKeys.BelongsTo("2019-07-04/IMG_0001.jpg.encrypted", photo, EncryptionFormat.V2));
+        Assert.False(ArchiveObjectKeys.BelongsTo("backups/database.dump", photo, EncryptionFormat.LegacyV1));
+        Assert.False(ArchiveObjectKeys.BelongsTo($"v2/2026/11/{photo:N}.txt", photo, EncryptionFormat.V2));
     }
 }

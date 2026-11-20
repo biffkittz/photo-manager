@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, apiFetch, configureHttp } from '../http'
+import { ApiError, CSRF_PROBLEM_TYPE, apiFetch, configureHttp } from '../http'
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -45,6 +45,41 @@ describe('apiFetch', () => {
     expect(error).toBeInstanceOf(ApiError)
     expect((error as ApiError).message).toBe('Search text is limited to 200 characters.')
     expect((error as ApiError).isClientError).toBe(true)
+  })
+
+  it('fetches a fresh CSRF token and retries once when the token was stale', async () => {
+    let token = 'stale'
+    const refreshCsrf = vi.fn<() => Promise<void>>(() => {
+      token = 'fresh'
+      return Promise.resolve()
+    })
+    configureHttp({ csrfToken: () => token, unauthorized: () => {}, refreshCsrf })
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse(403, { type: CSRF_PROBLEM_TYPE, title: 'Missing or invalid CSRF token.' }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await apiFetch('/api/auth/logout', { method: 'POST' })
+
+    expect(refreshCsrf).toHaveBeenCalledOnce()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect((fetchMock.mock.calls[1]![1]!.headers as Headers).get('X-CSRF-TOKEN')).toBe('fresh')
+  })
+
+  it('does not retry other 403 responses', async () => {
+    const refreshCsrf = vi.fn<() => Promise<void>>(() => Promise.resolve())
+    configureHttp({ csrfToken: () => 'token', unauthorized: () => {}, refreshCsrf })
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse(403, { title: 'Forbidden' }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(apiFetch('/api/jobs', { method: 'POST', body: {} })).rejects.toThrow('Forbidden')
+    expect(refreshCsrf).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledOnce()
   })
 
   it('notifies the auth layer when the session has expired', async () => {

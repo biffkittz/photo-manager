@@ -24,9 +24,10 @@ terraform {
   }
 
   # Remote state in the existing Terraform state storage account, shared with other projects; this project's
-  # blobs are photo.* (photo.bootstrap.tfstate holds infra/bootstrap). Entra ID authentication, no storage
-  # keys: your account and the CI identities need a Storage Blob Data role on the container (see
-  # infra/README.md#state). Backend blocks cannot use variables.
+  # blobs are photo.* (photo.bootstrap.tfstate holds infra/bootstrap; CI may use only this one). Entra ID
+  # authentication, no storage keys: your account needs a Storage Blob Data role on the container, the CI
+  # identities get the bootstrap's custom state roles (see infra/README.md#state). Backend blocks cannot use
+  # variables.
   backend "azurerm" {
     resource_group_name  = "rg-terraform-state"
     storage_account_name = "demonstration"

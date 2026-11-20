@@ -96,6 +96,44 @@ public sealed class WorkflowTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Upload_that_cannot_be_fully_decoded_is_rejected_not_archived()
+    {
+        // Inspection only reads headers; the renderer's full decode is what catches corrupt or disguised files.
+        var fakes = new FakeActivities { RenderError = FakeActivities.Permanent("UnsupportedImage") };
+        var result = await RunAsync(fakes, (PhotoIngestWorkflow wf) => wf.RunAsync(new PhotoIngestInput(Guid.NewGuid())));
+
+        Assert.Equal(PhotoStatus.Failed, result);
+        Assert.DoesNotContain("archive", fakes.Calls);
+        Assert.DoesNotContain("complete", fakes.Calls);
+        Assert.True(fakes.Outcome!.DeleteStaging);
+        Assert.Equal("UnsupportedImage for test", fakes.Outcome.Detail);
+    }
+
+    [Fact]
+    public async Task Other_rendition_failures_still_archive_the_upload()
+    {
+        var photoId = Guid.NewGuid();
+        var fakes = new FakeActivities { RenderError = FakeActivities.Permanent("DecryptionFailed") };
+        var result = await RunAsync(fakes, (PhotoIngestWorkflow wf) => wf.RunAsync(new PhotoIngestInput(photoId)));
+
+        Assert.Equal(PhotoStatus.Ready, result);
+        Assert.Contains($"renditions-failed:{photoId}", fakes.Calls);
+        Assert.Contains("archive", fakes.Calls);
+    }
+
+    [Fact]
+    public async Task Every_later_read_of_the_staged_upload_is_checked_against_the_inspected_hash()
+    {
+        var photoId = Guid.NewGuid();
+        var fakes = new FakeActivities { Inspection = new("inspected-hash", "image/jpeg", null) };
+        await RunAsync(fakes, (PhotoIngestWorkflow wf) => wf.RunAsync(new PhotoIngestInput(photoId)));
+
+        Assert.Equal(2, fakes.StagedInputs.Count);
+        Assert.All(fakes.StagedInputs, input => Assert.Equal(new StagedUploadInput(photoId, "inspected-hash"), input));
+        Assert.Equal("inspected-hash", fakes.ArchivedWith!.ExpectedSha256);
+    }
+
+    [Fact]
     public async Task Archive_failure_marks_failed_but_keeps_staging_for_retry()
     {
         var fakes = new FakeActivities { ArchiveError = FakeActivities.Permanent("NotFound") };

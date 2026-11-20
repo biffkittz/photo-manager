@@ -46,11 +46,10 @@ Secrets are not Terraform inputs, except the Temporal Cloud API key the provider
 
 | Name | Type |
 |------|------|
-| [azurerm_role_assignment.acr_pull](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment) | resource |
 | [azurerm_role_assignment.telemetry](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment) | resource |
-| [azurerm_user_assigned_identity.app](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/user_assigned_identity) | resource |
 | [azurerm_client_config.current](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/data-sources/client_config) | data source |
 | [azurerm_resource_group.app](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/data-sources/resource_group) | data source |
+| [azurerm_user_assigned_identity.app](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/data-sources/user_assigned_identity) | data source |
 
 ## Inputs
 
@@ -63,7 +62,6 @@ Secrets are not Terraform inputs, except the Temporal Cloud API key the provider
 | cloudflare\_zone\_name | Cloudflare zone containing the hostname. | `string` | `"biffkittz.com"` | no |
 | container\_registry\_login\_server | Login server of the registry; empty means <name>.azurecr.io. Set it only if the registry uses a domain name label (login server with a hash suffix). | `string` | `""` | no |
 | container\_registry\_name | Existing container registry holding the images (shared with another project). | `string` | `"crloginappdemo7fyguj"` | no |
-| container\_registry\_resource\_group | Resource group of the existing container registry (same subscription). | `string` | `"rg-loginapp-demo"` | no |
 | custom\_domain | Public hostname of the site. | `string` | `"photo.biffkittz.com"` | no |
 | environment | Environment name (must match infra/bootstrap). | `string` | `"prod"` | no |
 | gemini\_model | Gemini model id (pinned). | `string` | `"gemini-3.8-flash"` | no |

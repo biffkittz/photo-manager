@@ -1,4 +1,6 @@
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using PhotoManager.Api.Audit;
 using PhotoManager.Api.Auth;
 using PhotoManager.Api.Contracts;
@@ -18,8 +20,6 @@ namespace PhotoManager.Api.Downloads;
 /// </summary>
 public static class DownloadEndpoints
 {
-    private const int MaxPhotosPerDownload = 500;
-
     /// <summary>Maps <c>/api/downloads/*</c>.</summary>
     /// <param name="api">The /api route group.</param>
     /// <returns>The same group.</returns>
@@ -39,21 +39,55 @@ public static class DownloadEndpoints
         PhotoDbContext db,
         PhotoWorkflowClient workflows,
         AuditLog audit,
+        IOptions<DownloadOptions> options,
         TimeProvider time,
         CancellationToken ct)
     {
-        var ids = request.PhotoIds?.Distinct().ToList() ?? [];
-        if (ids.Count is 0 or > MaxPhotosPerDownload)
+        var limits = options.Value;
+
+        // Check raw list length before deduplicating so a payload full of duplicate GUIDs cannot force a large HashSet allocation.
+        if (request.PhotoIds is null || request.PhotoIds.Count == 0 || request.PhotoIds.Count > limits.MaxPhotosPerDownload)
         {
-            return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["photoIds"] = [$"Select between 1 and {MaxPhotosPerDownload} photos."] });
+            return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["photoIds"] = [$"Select between 1 and {limits.MaxPhotosPerDownload} photos."] });
+        }
+
+        var ids = request.PhotoIds.Distinct().ToList();
+        var now = time.GetUtcNow();
+        var userId = http.User.GitHubId();
+        var activePending = await db.Downloads.CountAsync(
+            d => d.RequestedById == userId && d.Status == DownloadStatus.Pending && d.ExpiresAt > now,
+            ct);
+        if (activePending >= limits.MaxPendingDownloadsPerUser)
+        {
+            return TypedResults.Problem(
+                statusCode: StatusCodes.Status429TooManyRequests,
+                title: $"You can prepare at most {limits.MaxPendingDownloadsPerUser} downloads at a time. Wait for one to finish and try again.");
         }
 
         // Photos that are no longer available (missing from the archive, hidden as duplicates) are skipped and
         // reported once the download is ready; only a request with nothing left to download is refused.
-        var available = await db.Photos.CountAsync(p => ids.Contains(p.Id) && p.Status == PhotoStatus.Ready && p.ArchiveKey != null, ct);
-        if (available == 0)
+        var availableSizes = await db.Photos.AsNoTracking()
+            .Where(p => ids.Contains(p.Id) && p.Status == PhotoStatus.Ready && p.ArchiveKey != null)
+            .Select(p => p.SizeBytes ?? p.ArchiveSizeBytes ?? 0L)
+            .ToListAsync(ct);
+        if (availableSizes.Count == 0)
         {
             return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["photoIds"] = ["None of the selected photos are available for download."] });
+        }
+
+        long estimatedBytes = 0;
+        foreach (var photoBytes in availableSizes)
+        {
+            var size = Math.Max(0L, photoBytes);
+            if (size > limits.MaxDownloadBytes - estimatedBytes)
+            {
+                return TypedResults.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["photoIds"] = [$"Selected photos exceed the {FormatByteLimit(limits.MaxDownloadBytes)} download size limit."],
+                });
+            }
+
+            estimatedBytes += size;
         }
 
         var download = new PreparedDownload
@@ -62,25 +96,25 @@ public static class DownloadEndpoints
             Status = DownloadStatus.Pending,
             PhotoIds = ids,
             RequestedBy = http.User.Login(),
-            RequestedById = http.User.GitHubId(),
+            RequestedById = userId,
             FileName = ids.Count == 1 ? "photo" : "photos.zip",
-            ExpiresAt = time.GetUtcNow().AddDays(1),
+            ExpiresAt = now.AddDays(1),
         };
         db.Downloads.Add(download);
         await db.SaveChangesAsync(ct);
         await audit.WriteAsync("photo.download.request", download.Id.ToString(), new { count = ids.Count });
         try
         {
-            await workflows.StartPrepareDownloadAsync(download.Id, ct);
+            await workflows.StartPrepareDownloadAsync(download.Id);
         }
         catch (Exception ex) when (TemporalUnavailable.Matches(ex))
         {
             // Record the failure instead of leaving a download that stays "preparing" forever.
-            var now = time.GetUtcNow();
+            var failedAt = time.GetUtcNow();
             await db.Downloads.Where(d => d.Id == download.Id && d.Status == DownloadStatus.Pending).ExecuteUpdateAsync(
                 s => s.SetProperty(d => d.Status, DownloadStatus.Failed)
                       .SetProperty(d => d.Error, "The download could not be started. Try again shortly.")
-                      .SetProperty(d => d.UpdatedAt, now),
+                      .SetProperty(d => d.UpdatedAt, failedAt),
                 CancellationToken.None);
             return TemporalUnavailable.Problem();
         }
@@ -154,4 +188,11 @@ public static class DownloadEndpoints
 
     private static DownloadResponse ToResponse(PreparedDownload d) =>
         new(d.Id, d.Status, d.FileName, d.SizeBytes, d.Error, d.ExpiresAt, d.PhotoIds.Count - d.SkippedCount, d.SkippedCount);
+
+    private static string FormatByteLimit(long bytes) => bytes switch
+    {
+        >= 1024L * 1024 * 1024 => string.Create(CultureInfo.InvariantCulture, $"{bytes / (1024.0 * 1024 * 1024):0.#} GB"),
+        >= 1024L * 1024 => string.Create(CultureInfo.InvariantCulture, $"{bytes / (1024.0 * 1024):0.#} MB"),
+        _ => string.Create(CultureInfo.InvariantCulture, $"{bytes} bytes"),
+    };
 }

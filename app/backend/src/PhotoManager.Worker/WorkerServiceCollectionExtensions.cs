@@ -24,10 +24,18 @@ public static class WorkerServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(environment);
 
-        services.AddOptions<WorkerOptions>().BindConfiguration(WorkerOptions.SectionName);
+        services.AddOptions<WorkerOptions>()
+            .BindConfiguration(WorkerOptions.SectionName)
+            .Validate(o => o.MaxPhotosPerDownload > 0, "Worker:MaxPhotosPerDownload must be positive.")
+            .Validate(o => o.MaxDownloadBytes > 0, "Worker:MaxDownloadBytes must be positive.")
+            .Validate(o => o.MaxDownloadPhotosPerDay > 0, "Worker:MaxDownloadPhotosPerDay must be positive.")
+            .ValidateOnStart();
         services.AddOptions<ArchiveStorageOptions>().BindConfiguration(ArchiveStorageOptions.SectionName).ValidateDataAnnotations().ValidateOnStart();
         services.AddOptions<BlobStorageOptions>().BindConfiguration(BlobStorageOptions.SectionName);
-        services.AddOptions<ImagingOptions>().BindConfiguration(ImagingOptions.SectionName);
+        services.AddOptions<ImagingOptions>().BindConfiguration(ImagingOptions.SectionName)
+            .Validate(o => o.MaxConcurrentDecodes > 0, "Imaging:MaxConcurrentDecodes must be positive.")
+            .Validate(o => o.DecodeMemoryLimitMegabytes > 0, "Imaging:DecodeMemoryLimitMegabytes must be positive.")
+            .ValidateOnStart();
         services.AddOptions<GeminiOptions>().BindConfiguration(GeminiOptions.SectionName)
             .Validate(o => o.UseFake || !string.IsNullOrWhiteSpace(o.ApiKey), "Gemini:ApiKey is required unless Gemini:UseFake is set.")
             .Validate(o => !o.UseFake || environment.IsDevelopment(), "Gemini:UseFake is only allowed in Development.")

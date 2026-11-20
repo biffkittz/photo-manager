@@ -20,6 +20,7 @@ public sealed class MaintenanceActivities(
     ILogger<MaintenanceActivities> logger)
 {
     private const int ListPageSize = 1000;
+    private const string DuplicateDetail = "This photo is already in the library.";
 
     /// <summary>Creates the job record if missing (scheduled runs) and marks it running.</summary>
     /// <param name="input">Deterministic job id, kind and workflow id.</param>
@@ -43,6 +44,13 @@ public sealed class MaintenanceActivities(
                 RequestedBy = "schedule",
                 StartedAt = now,
             });
+        }
+        else if (job.Status is JobStatus.Cancelled or JobStatus.Failed or JobStatus.Completed)
+        {
+            // Closed before this run got going: stopped while its start was still being recorded, or recorded as
+            // "not started" because Temporal looked unavailable when it had in fact accepted the start. The run must
+            // not do the work anyway, and the record keeps saying what the user was told.
+            throw ActivityErrors.Permanent(ActivityErrors.InvalidState, "The job was closed before it started.");
         }
         else if (job.Status == JobStatus.Queued)
         {
@@ -81,6 +89,14 @@ public sealed class MaintenanceActivities(
     /// Indexes one page (up to 1000 objects) of the archive: creates records for new objects, refreshes
     /// changed ones, and stamps <see cref="Photo.LastSeenAt"/> on everything it sees.
     /// </summary>
+    /// <remarks>
+    /// Rows are read without tracking and changed with targeted updates, so editing a photo of this page meanwhile
+    /// (a description, a finished rendition) cannot fail the page with a concurrency error. A photo that comes back
+    /// as Ready (restored from Missing, or recovered from its v2 file after losing the database) but whose content
+    /// is already Ready under another record becomes Duplicate, as ingest would have recorded it: two identical
+    /// uploads archived at the same time leave two v2 files with the same hash, and without this a disaster
+    /// recovery would fail on <see cref="DbErrors.UniqueReadyContentIndex"/> at that page and every page after it.
+    /// </remarks>
     /// <param name="continuationToken">S3 continuation token, or null for the first page.</param>
     /// <returns>The next token and this page's counters.</returns>
     [Activity("IndexArchivePage")]
@@ -93,7 +109,10 @@ public sealed class MaintenanceActivities(
             var page = await archive.ListAsync(continuationToken, ListPageSize, ct);
             var objects = page.Objects.Where(o => ArchiveObjectKeys.TryClassify(o.Key, out _)).ToList();
             var keys = objects.Select(o => o.Key).ToList();
-            var byKey = await db.Photos.Where(p => p.ArchiveKey != null && keys.Contains(p.ArchiveKey)).ToDictionaryAsync(p => p.ArchiveKey!, ct);
+            var byKey = await db.Photos.AsNoTracking()
+                .Where(p => p.ArchiveKey != null && keys.Contains(p.ArchiveKey))
+                .Select(p => new IndexedPhoto(p.Id, p.ArchiveKey!, p.Status, p.ArchiveETag, p.ArchiveSizeBytes, p.Sha256))
+                .ToDictionaryAsync(p => p.ArchiveKey, ct);
 
             // v2 objects carry the photo id in their key; a record may exist without an archive key yet
             // (ingest uploaded the object but has not completed), so those must not be inserted twice.
@@ -101,64 +120,96 @@ public sealed class MaintenanceActivities(
             var existingV2Ids = await db.Photos.Where(p => v2Ids.Contains(p.Id)).Select(p => p.Id).ToHashSetAsync(ct);
 
             var now = time.GetUtcNow();
-            int added = 0, updated = 0;
+            var seen = new List<Guid>(objects.Count);
+            var replaced = new List<(IndexedPhoto Photo, ArchiveObjectInfo Item)>();
+            var restored = new List<IndexedPhoto>();
+            var created = new List<Photo>();
             foreach (var item in objects)
             {
-                if (byKey.TryGetValue(item.Key, out var photo))
+                if (byKey.TryGetValue(item.Key, out var existing))
                 {
-                    photo.LastSeenAt = now;
-                    var changed = false;
-                    if (photo.Status == PhotoStatus.Missing)
+                    seen.Add(existing.Id);
+                    if (existing.ArchiveETag != item.ETag || existing.ArchiveSizeBytes != item.Size)
                     {
-                        photo.Status = PhotoStatus.Ready;
-                        photo.StatusDetail = null;
-                        changed = true;
+                        replaced.Add((existing, item));
+                    }
+                    else if (existing.Status == PhotoStatus.Missing)
+                    {
+                        restored.Add(existing);
                     }
 
-                    if (photo.ArchiveETag != item.ETag || photo.ArchiveSizeBytes != item.Size)
-                    {
-                        // The object was replaced in place (e.g. re-uploaded by protect.ps1): renditions and content
-                        // facts are stale, and a photo hidden as a duplicate may no longer be one. The next thumbnail
-                        // backfill recomputes all of it.
-                        photo.ArchiveETag = item.ETag;
-                        photo.ArchiveSizeBytes = item.Size;
-                        photo.RenditionState = ProcessingState.NotStarted;
-                        photo.Sha256 = null;
-                        photo.SizeBytes = null;
-                        if (photo.Status == PhotoStatus.Duplicate)
-                        {
-                            photo.Status = PhotoStatus.Ready;
-                            photo.StatusDetail = null;
-                        }
-
-                        changed = true;
-                    }
-
-                    updated += changed ? 1 : 0;
                     continue;
                 }
 
-                if (ArchiveObjectKeys.TryParseV2PhotoId(item.Key, out var v2Id) && existingV2Ids.Contains(v2Id))
+                // Add, not Contains: two keys on one page carrying the same photo id must not both be inserted.
+                if (ArchiveObjectKeys.TryParseV2PhotoId(item.Key, out var v2Id) && !existingV2Ids.Add(v2Id))
                 {
                     continue;
                 }
 
-                db.Photos.Add(await CreateRecordAsync(item, now, ct));
-                added++;
-                if (added % 50 == 0)
+                created.Add(await CreateRecordAsync(item, now, ct));
+                if (created.Count % 50 == 0)
                 {
-                    context.Heartbeat(added);
+                    context.Heartbeat(created.Count);
                 }
             }
 
-            await db.SaveChangesAsync(ct);
-            return new IndexPageResult(page.NextContinuationToken, new ReindexProgress(1, objects.Count, added, updated));
+            foreach (var (photo, item) in replaced)
+            {
+                await RefreshReplacedAsync(photo.Id, item, now, ct);
+            }
+
+            // At most one Ready photo per content hash. Hashes already Ready elsewhere win; within the page, the
+            // first claim wins (restored records before newly created ones).
+            var candidateHashes = restored.Select(p => p.Sha256).Concat(created.Select(p => p.Sha256))
+                .OfType<string>()
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            var readyHashes = candidateHashes.Count == 0
+                ? new HashSet<string>(StringComparer.Ordinal)
+                : await db.Photos.AsNoTracking()
+                    .Where(p => p.Status == PhotoStatus.Ready && p.Sha256 != null && candidateHashes.Contains(p.Sha256))
+                    .Select(p => p.Sha256!)
+                    .ToHashSetAsync(StringComparer.Ordinal, ct);
+
+            foreach (var photo in restored)
+            {
+                await RestoreAsync(photo.Id, ClaimContent(readyHashes, photo.Sha256), now, ct);
+            }
+
+            foreach (var record in created.Where(r => r.Status == PhotoStatus.Ready && !ClaimContent(readyHashes, r.Sha256)))
+            {
+                record.Status = PhotoStatus.Duplicate;
+                record.StatusDetail = DuplicateDetail;
+            }
+
+            if (created.Count > 0)
+            {
+                db.Photos.AddRange(created);
+                await db.SaveChangesAsync(ct);
+            }
+
+            if (seen.Count > 0)
+            {
+                await db.Photos.Where(p => seen.Contains(p.Id)).ExecuteUpdateAsync(s => s.SetProperty(p => p.LastSeenAt, now), ct);
+            }
+
+            return new IndexPageResult(page.NextContinuationToken, new ReindexProgress(1, objects.Count, created.Count, replaced.Count + restored.Count));
         }
         catch (Exception ex) when (ActivityErrors.TryTranslate(ex, out var failure))
         {
             throw failure;
         }
     }
+
+    /// <summary>
+    /// Claims a content hash for a photo about to become Ready. False means another photo already holds it, so this
+    /// one must be recorded as a duplicate. Photos without a known hash (legacy files not yet decoded) always may.
+    /// </summary>
+    /// <param name="readyHashes">Hashes already Ready; updated with the claimed one.</param>
+    /// <param name="sha256">The photo's hash, if known.</param>
+    /// <returns>Whether the photo may be Ready.</returns>
+    internal static bool ClaimContent(ISet<string> readyHashes, string? sha256) => sha256 is null || readyHashes.Add(sha256);
 
     /// <summary>
     /// Marks photos that a completed scan did not see as missing. Refuses implausible sweeps unless forced: an
@@ -238,6 +289,29 @@ public sealed class MaintenanceActivities(
 
         return await photos.OrderBy(p => p.Id).Select(p => p.Id).Take(query.Limit).ToListAsync(ActivityExecutionContext.Current.CancellationToken);
     }
+
+    // The object was replaced in place (e.g. re-uploaded by protect.ps1): renditions and content facts are stale, and
+    // a photo hidden as a duplicate (or missing) may no longer be one. The next thumbnail backfill recomputes the hash.
+    // Without a hash the photo cannot collide with another Ready one.
+    private Task<int> RefreshReplacedAsync(Guid photoId, ArchiveObjectInfo item, DateTimeOffset now, CancellationToken cancellationToken) =>
+        db.Photos.Where(p => p.Id == photoId).ExecuteUpdateAsync(
+            s => s.SetProperty(p => p.ArchiveETag, item.ETag)
+                  .SetProperty(p => p.ArchiveSizeBytes, item.Size)
+                  .SetProperty(p => p.RenditionState, ProcessingState.NotStarted)
+                  .SetProperty(p => p.Sha256, (string?)null)
+                  .SetProperty(p => p.SizeBytes, (long?)null)
+                  .SetProperty(p => p.StatusDetail, p => p.Status == PhotoStatus.Missing || p.Status == PhotoStatus.Duplicate ? null : p.StatusDetail)
+                  .SetProperty(p => p.Status, p => p.Status == PhotoStatus.Missing || p.Status == PhotoStatus.Duplicate ? PhotoStatus.Ready : p.Status)
+                  .SetProperty(p => p.UpdatedAt, now),
+            cancellationToken);
+
+    // A photo marked missing whose object is back: Ready again, or Duplicate if its content became Ready elsewhere.
+    private Task<int> RestoreAsync(Guid photoId, bool ready, DateTimeOffset now, CancellationToken cancellationToken) =>
+        db.Photos.Where(p => p.Id == photoId && p.Status == PhotoStatus.Missing).ExecuteUpdateAsync(
+            s => s.SetProperty(p => p.Status, ready ? PhotoStatus.Ready : PhotoStatus.Duplicate)
+                  .SetProperty(p => p.StatusDetail, ready ? null : DuplicateDetail)
+                  .SetProperty(p => p.UpdatedAt, now),
+            cancellationToken);
 
     private async Task<Photo> CreateRecordAsync(ArchiveObjectInfo item, DateTimeOffset now, CancellationToken cancellationToken)
     {
@@ -324,4 +398,6 @@ public sealed class MaintenanceActivities(
 
         return photo;
     }
+
+    private sealed record IndexedPhoto(Guid Id, string ArchiveKey, PhotoStatus Status, string? ArchiveETag, long? ArchiveSizeBytes, string? Sha256);
 }

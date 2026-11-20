@@ -420,6 +420,10 @@ namespace PhotoManager.Data.Migrations
                         .HasColumnType("uuid[]")
                         .HasColumnName("photo_ids");
 
+                    b.Property<DateTimeOffset?>("PreparedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("prepared_at");
+
                     b.Property<string>("RequestedBy")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -456,6 +460,10 @@ namespace PhotoManager.Data.Migrations
 
                     b.HasKey("Id")
                         .HasName("pk_prepared_downloads");
+
+                    b.HasIndex("PreparedAt")
+                        .HasDatabaseName("ix_prepared_downloads_prepared_at")
+                        .HasFilter("prepared_at IS NOT NULL");
 
                     b.HasIndex("RequestedBy", "CreatedAt")
                         .IsDescending(false, true)

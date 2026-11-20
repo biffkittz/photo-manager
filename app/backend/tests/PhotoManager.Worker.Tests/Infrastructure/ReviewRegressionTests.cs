@@ -8,6 +8,7 @@ using PhotoManager.Worker.Activities;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Metadata.Profiles.Exif;
 using SixLabors.ImageSharp.PixelFormats;
+using Temporalio.Exceptions;
 
 namespace PhotoManager.Worker.Tests.Infrastructure;
 
@@ -48,7 +49,8 @@ public sealed class ReviewRegressionTests
         await image.SaveAsJpegAsync(jpeg, Ct);
         jpeg.Position = 0;
 
-        var inspection = await new PhotoImageProcessor(Options.Create(new ImagingOptions())).InspectAsync(jpeg, Ct);
+        using var processor = new PhotoImageProcessor(Options.Create(new ImagingOptions()));
+        var inspection = await processor.InspectAsync(jpeg, Ct);
 
         Assert.Equal(new DateTimeOffset(2024, 7, 5, 0, 30, 0, TimeSpan.Zero), inspection.TakenAt!.Value.ToUniversalTime());
     }
@@ -83,4 +85,49 @@ public sealed class ReviewRegressionTests
     [InlineData(5000, 500)]
     public void Sweep_limit_is_ten_percent_with_a_small_floor(int total, int expected) =>
         Assert.Equal(expected, MaintenanceActivities.SweepLimit(total));
+
+    [Fact]
+    public void Download_size_estimate_rejects_aggregates_above_limit_without_overflow()
+    {
+        DownloadActivities.EnsureEstimatedSizeWithinLimit([500, 500], 1000);
+
+        var exceeded = Assert.Throws<ApplicationFailureException>(() =>
+            DownloadActivities.EnsureEstimatedSizeWithinLimit([600, 500], 1000));
+        Assert.Equal("TooLarge", exceeded.ErrorType);
+        Assert.True(exceeded.NonRetryable);
+
+        var overflow = Assert.Throws<ApplicationFailureException>(() =>
+            DownloadActivities.EnsureEstimatedSizeWithinLimit([long.MaxValue, 1], long.MaxValue));
+        Assert.Equal("TooLarge", overflow.ErrorType);
+        Assert.True(overflow.NonRetryable);
+    }
+
+    [Fact]
+    public void A_photo_may_only_be_ready_if_no_other_photo_holds_its_content()
+    {
+        var ready = new HashSet<string>(StringComparer.Ordinal) { "already-ready" };
+
+        Assert.False(MaintenanceActivities.ClaimContent(ready, "already-ready"));
+        Assert.True(MaintenanceActivities.ClaimContent(ready, "new"));
+        Assert.False(MaintenanceActivities.ClaimContent(ready, "new")); // a second copy on the same page
+        Assert.True(MaintenanceActivities.ClaimContent(ready, null)); // legacy file, content not known yet
+    }
+
+    [Fact]
+    public async Task Download_copy_enforces_cumulative_byte_budget_across_streams()
+    {
+        var budget = new DownloadActivities.DownloadByteBudget(100);
+        using var destination = new MemoryStream();
+
+        using var first = new MemoryStream(new byte[60]);
+        await DownloadActivities.CopyWithHeartbeatsAsync(first, destination, budget, static () => { }, Ct);
+        Assert.Equal(60, destination.Length);
+
+        using var second = new MemoryStream(new byte[50]);
+        var error = await Assert.ThrowsAsync<ApplicationFailureException>(() =>
+            DownloadActivities.CopyWithHeartbeatsAsync(second, destination, budget, static () => { }, Ct));
+        Assert.Equal("TooLarge", error.ErrorType);
+        Assert.True(error.NonRetryable);
+        Assert.Equal(60, destination.Length);
+    }
 }

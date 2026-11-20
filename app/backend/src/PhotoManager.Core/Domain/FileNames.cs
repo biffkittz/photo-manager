@@ -31,11 +31,6 @@ public static class FileNames
         var previousWasSpace = false;
         foreach (var rune in candidate.EnumerateRunes())
         {
-            if (builder.Length >= MaxLength)
-            {
-                break;
-            }
-
             if (Rune.IsControl(rune) || IsBidiControl(rune) || IsInvalidFileNameChar(rune))
             {
                 continue;
@@ -45,6 +40,11 @@ public static class FileNames
             {
                 if (!previousWasSpace && builder.Length > 0)
                 {
+                    if (builder.Length >= MaxLength)
+                    {
+                        break;
+                    }
+
                     builder.Append(' ');
                 }
 
@@ -52,29 +52,62 @@ public static class FileNames
                 continue;
             }
 
+            if (builder.Length + rune.Utf16SequenceLength > MaxLength)
+            {
+                break;
+            }
+
             previousWasSpace = false;
             builder.Append(rune);
         }
 
-        var result = builder.ToString().Trim().Trim('.');
+        var result = builder.ToString().Trim(' ', '.');
         return result.Length == 0 ? Fallback : result;
     }
 
     /// <summary>Replaces the extension of <paramref name="fileName"/> with <paramref name="extension"/>.</summary>
     /// <param name="fileName">A sanitized filename.</param>
     /// <param name="extension">The extension including the dot.</param>
-    /// <returns>The adjusted filename.</returns>
+    /// <returns>The adjusted filename, guaranteed to fit within <see cref="MaxLength"/>.</returns>
     public static string WithExtension(string fileName, string extension)
     {
         ArgumentNullException.ThrowIfNull(fileName);
+        ArgumentNullException.ThrowIfNull(extension);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(extension.Length, MaxLength);
+
         var current = Path.GetExtension(fileName);
-        if (string.Equals(current, extension, StringComparison.OrdinalIgnoreCase)
-            || (extension == ".jpg" && string.Equals(current, ".jpeg", StringComparison.OrdinalIgnoreCase)))
+        var keepCurrent = string.Equals(current, extension, StringComparison.OrdinalIgnoreCase)
+            || (extension == ".jpg" && string.Equals(current, ".jpeg", StringComparison.OrdinalIgnoreCase));
+        if (keepCurrent && fileName.Length <= MaxLength)
         {
             return fileName;
         }
 
-        return Path.GetFileNameWithoutExtension(fileName) + extension;
+        var targetExtension = keepCurrent ? current : extension;
+        var maxStemLength = MaxLength - targetExtension.Length;
+        var stem = TruncateUtf16Safe(Path.GetFileNameWithoutExtension(fileName), maxStemLength).Trim(' ', '.');
+        if (stem.Length == 0)
+        {
+            stem = TruncateUtf16Safe(Fallback, maxStemLength);
+        }
+
+        return stem + targetExtension;
+    }
+
+    private static string TruncateUtf16Safe(string value, int maxLength)
+    {
+        if (value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        var length = maxLength;
+        if (length > 0 && char.IsHighSurrogate(value[length - 1]))
+        {
+            length--;
+        }
+
+        return value[..length];
     }
 
     private static bool IsInvalidFileNameChar(Rune rune) =>

@@ -49,6 +49,7 @@ public static class AuthEndpoints
         {
             await audit.WriteAsync("auth.signout", null, null);
             await http.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            http.Response.Headers[AuthenticationSetup.ClearSiteDataHeader] = AuthenticationSetup.ClearCacheDirective;
             return TypedResults.NoContent();
         });
 

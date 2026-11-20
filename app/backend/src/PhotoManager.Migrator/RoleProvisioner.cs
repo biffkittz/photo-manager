@@ -8,9 +8,28 @@ namespace PhotoManager.Migrator;
 /// DELETE anything or alter the schema; the web tier can only append to the audit trail and cannot read it back;
 /// the workers cannot touch it. Only the migrator identity (the server's Entra administrator) owns the tables.
 /// </summary>
-internal static partial class RoleProvisioner
+public static partial class RoleProvisioner
 {
     private static readonly string[] DataTables = ["photos", "maintenance_jobs", "prepared_downloads"];
+
+    /// <summary>
+    /// The only photo columns the web tier may change: upload status (start failures and retries), descriptions and
+    /// requests for processing, plus the derived search keywords and the timestamp. Where a photo lives in the
+    /// archive, how it is encrypted, its content hash and its owner are written by the workers alone, so a
+    /// compromised web tier cannot point a photo at another archive object for a worker to decrypt.
+    /// </summary>
+    public static IReadOnlyList<string> WebEditablePhotoColumns { get; } =
+    [
+        "status",
+        "status_detail",
+        "description",
+        "description_source",
+        "description_model",
+        "description_state",
+        "rendition_state",
+        "search_keywords",
+        "updated_at",
+    ];
 
     /// <summary>Ensures each role exists (via the <c>postgres</c> database) and applies grants in the app database.</summary>
     public static async Task ProvisionAsync(NpgsqlDataSource adminDataSource, NpgsqlDataSource appDataSource, string databaseName, IReadOnlyList<AppRole> roles, CancellationToken cancellationToken)
@@ -45,7 +64,8 @@ internal static partial class RoleProvisioner
             var quotedRole = $"\"{role.Name}\"";
 
             // Revoke, then grant exactly what the tier needs, in one transaction: grants are additive, so this is
-            // what makes a narrowed privilege set actually take effect on databases provisioned earlier.
+            // what makes a narrowed privilege set actually take effect on databases provisioned earlier. (Revoking a
+            // table privilege also revokes the matching column privileges.)
             var statements = new List<string>
             {
                 $"REVOKE ALL ON {string.Join(", ", DataTables)}, audit_events FROM {quotedRole}",
@@ -58,7 +78,9 @@ internal static partial class RoleProvisioner
             {
                 statements.AddRange(
                 [
-                    $"GRANT SELECT, INSERT, UPDATE ON photos, maintenance_jobs TO {quotedRole}",
+                    $"GRANT SELECT, INSERT, UPDATE ON maintenance_jobs TO {quotedRole}",
+                    $"GRANT SELECT, INSERT ON photos TO {quotedRole}",
+                    $"GRANT UPDATE ({string.Join(", ", WebEditablePhotoColumns)}) ON photos TO {quotedRole}",
 
                     // Downloads: create them, read them, and record a failed start; preparing them is worker work.
                     $"GRANT SELECT, INSERT ON prepared_downloads TO {quotedRole}",

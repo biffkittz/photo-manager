@@ -29,21 +29,23 @@ get access to this project's `photo.*` blobs in the existing, shared Terraform s
 | [azurerm_container_registry_task.image_cleanup](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/container_registry_task) | resource |
 | [azurerm_federated_identity_credential.github_deploy](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/federated_identity_credential) | resource |
 | [azurerm_federated_identity_credential.github_plan](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/federated_identity_credential) | resource |
+| [azurerm_federated_identity_credential.github_plan_main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/federated_identity_credential) | resource |
 | [azurerm_resource_group.app](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/resource_group) | resource |
 | [azurerm_resource_group.cicd](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/resource_group) | resource |
+| [azurerm_role_assignment.app_acr_pull](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment) | resource |
 | [azurerm_role_assignment.deploy_acr_push](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment) | resource |
 | [azurerm_role_assignment.deploy_contributor](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment) | resource |
 | [azurerm_role_assignment.deploy_rbac_admin](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment) | resource |
-| [azurerm_role_assignment.deploy_registry_rbac_admin](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment) | resource |
 | [azurerm_role_assignment.deploy_state](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment) | resource |
 | [azurerm_role_assignment.plan_reader](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment) | resource |
-| [azurerm_role_assignment.plan_registry_reader](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment) | resource |
 | [azurerm_role_assignment.plan_state](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment) | resource |
+| [azurerm_role_definition.blob_data_writer](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_definition) | resource |
+| [azurerm_role_definition.state_reader](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_definition) | resource |
+| [azurerm_role_definition.state_writer](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_definition) | resource |
 | [azurerm_role_definition.terraform_planner](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_definition) | resource |
-| [azurerm_role_definition.terraform_planner_registry](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_definition) | resource |
+| [azurerm_user_assigned_identity.app](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/user_assigned_identity) | resource |
 | [azurerm_user_assigned_identity.github_deploy](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/user_assigned_identity) | resource |
 | [azurerm_user_assigned_identity.github_plan](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/user_assigned_identity) | resource |
-| [azurerm_role_definition.acr_pull](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/data-sources/role_definition) | data source |
 | [azurerm_role_definition.assignable](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/data-sources/role_definition) | data source |
 
 ## Inputs
@@ -62,8 +64,8 @@ get access to this project's `photo.*` blobs in the existing, shared Terraform s
 | registry\_cleanup\_enabled | Run the weekly clean-up of this project's images (photo-web, photo-worker, photo-migrator) in the shared registry. | `bool` | `true` | no |
 | registry\_cleanup\_keep | Always keep this many of the newest candidate tags per repository (rollback targets). | `number` | `10` | no |
 | registry\_cleanup\_older\_than\_days | Image tags older than this many days are candidates for deletion. | `number` | `30` | no |
-| scope\_state\_access\_to\_prefix | Limit the CI identities' state access to blobs named state\_blob\_prefix* with an ABAC condition. Set false only if the condition is rejected for the state account. | `bool` | `true` | no |
-| state\_blob\_prefix | Prefix of this project's state blobs in the shared container; CI identities can only touch these. | `string` | `"photo."` | no |
+| scope\_state\_access\_to\_prefix | Limit the CI identities' state access to blobs named state\_blob\_prefix* with an ABAC condition. Set false only if the condition is rejected for the state account (CI could then use every blob in the container). | `bool` | `true` | no |
+| state\_blob\_prefix | Blob-name prefix the CI identities may use in the shared state container. The default covers only the production state (photo.terraform.tfstate and its workspace states), not this configuration's own photo.bootstrap.tfstate. | `string` | `"photo.terraform.tfstate"` | no |
 | state\_container\_name | Blob container holding the state files (must match the backend blocks). | `string` | `"terraform"` | no |
 | state\_resource\_group\_name | Resource group of the existing Terraform state storage account (must match the backend blocks). | `string` | `"rg-terraform-state"` | no |
 | state\_storage\_account\_name | Existing Terraform state storage account (must match the backend blocks). | `string` | `"demonstration"` | no |

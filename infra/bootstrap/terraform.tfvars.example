@@ -16,9 +16,11 @@ subscription_id = "00000000-0000-0000-0000-000000000000" # az account show --que
 
 # --- Shared container registry (defaults) ------------------------------------------------------------------
 
-container_registry_name           = "crloginappdemo7fyguj"
-container_registry_resource_group = "rg-loginapp-demo"
-container_registry_login_server   = "crloginappdemo7fyguj-abcdef1234.azurecr.io" # only with a domain name label
+# container_registry_name           = "crloginappdemo7fyguj"
+# container_registry_resource_group = "rg-loginapp-demo"
+
+# Only if the registry uses a domain name label (its login server then has a hash suffix):
+# container_registry_login_server = "crloginappdemo7fyguj-abcdef1234.azurecr.io"
 
 # Weekly clean-up of this project's images in that registry (docs/operations.md#container-registry-storage).
 # registry_cleanup_enabled         = true
@@ -31,8 +33,8 @@ container_registry_login_server   = "crloginappdemo7fyguj-abcdef1234.azurecr.io"
 # state_resource_group_name    = "rg-terraform-state"
 # state_storage_account_name   = "demonstration"
 # state_container_name         = "terraform"
-# state_blob_prefix            = "photo."
-# scope_state_access_to_prefix = true # false only if Azure rejects the photo.* condition (see infra/README.md#state)
+# state_blob_prefix            = "photo.terraform.tfstate" # what CI may use; never the bootstrap's own state
+# scope_state_access_to_prefix = true # false only if Azure rejects the condition (see infra/README.md#state)
 
 # --- Tags (added to every resource) ------------------------------------------------------------------------
 

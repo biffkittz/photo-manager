@@ -20,16 +20,22 @@ public sealed class RenditionActivities(
     IBlobStore blobs,
     TimeProvider time)
 {
-    /// <summary>Creates renditions from a staged upload (during ingest).</summary>
-    /// <param name="photoId">The photo.</param>
+    /// <summary>
+    /// Creates renditions from a staged upload (during ingest). This is the first full decode of an upload, so an
+    /// image that cannot be decoded fails here with <see cref="ActivityErrors.UnsupportedImage"/>, and the ingest
+    /// rejects the upload instead of archiving it.
+    /// </summary>
+    /// <param name="input">The photo and the hash its inspection computed.</param>
     /// <returns>A task that completes when the renditions are stored.</returns>
     [Activity("CreateRenditionsFromStaging")]
-    public async Task CreateRenditionsFromStagingAsync(Guid photoId)
+    public async Task CreateRenditionsFromStagingAsync(StagedUploadInput input)
     {
+        ArgumentNullException.ThrowIfNull(input);
         var ct = ActivityExecutionContext.Current.CancellationToken;
+        var photoId = input.PhotoId;
         try
         {
-            using var image = await loader.LoadStagedAsync(photoId, ct);
+            using var image = await loader.LoadStagedAsync(photoId, input.ExpectedSha256, ct);
             await StoreAsync(photoId, image, ct);
             var now = time.GetUtcNow();
             await db.Photos.Where(p => p.Id == photoId).ExecuteUpdateAsync(

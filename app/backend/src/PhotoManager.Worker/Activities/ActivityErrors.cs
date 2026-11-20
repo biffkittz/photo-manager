@@ -23,9 +23,12 @@ internal static class ActivityErrors
     public const string InvalidState = "InvalidState";
     public const string TooLarge = "TooLarge";
 
+    /// <summary>A configured limit was reached (for example the daily download limit); the message says which.</summary>
+    public const string LimitReached = "LimitReached";
+
     /// <summary>Gets error types that must never be retried. Shared by every retry policy.</summary>
     public static IReadOnlyCollection<string> PermanentTypes { get; } =
-        [UnsupportedImage, DecryptionFailed, KeyUnavailable, NotFound, DescriptionRejected, InvalidState, TooLarge];
+        [UnsupportedImage, DecryptionFailed, KeyUnavailable, NotFound, DescriptionRejected, InvalidState, TooLarge, LimitReached];
 
     /// <summary>Creates a non-retryable failure.</summary>
     public static ApplicationFailureException Permanent(string errorType, string message, Exception? inner = null) =>
@@ -70,7 +73,7 @@ internal static class ActivityErrors
         var applicationFailure = exception as ApplicationFailureException ?? exception.InnerException as ApplicationFailureException;
         return applicationFailure?.ErrorType switch
         {
-            UnsupportedImage or DescriptionRejected or TooLarge => applicationFailure.Message,
+            UnsupportedImage or DescriptionRejected or TooLarge or LimitReached => applicationFailure.Message,
             DecryptionFailed => "The file could not be decrypted; it may be corrupted.",
             KeyUnavailable => "The key required for this file is not configured.",
             NotFound => "The stored file could not be found.",

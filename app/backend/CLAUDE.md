@@ -25,7 +25,7 @@ never read or print it).
 | `PhotoManager.Infrastructure` | Azure/Wasabi/Gemini/Temporal clients, options, imaging, telemetry | Library: `ConfigureAwait(false)` everywhere |
 | `PhotoManager.Api` | Web tier: auth, endpoints, SPA hosting | Must never receive `Crypto:ArchivePassword` |
 | `PhotoManager.Worker` | Temporal workers (4 task queues), activities, workflows, nightly schedule | Holds the archive password |
-| `PhotoManager.Migrator` | Applies migrations and database grants (Container Apps Job) | Update `RoleProvisioner` for new tables |
+| `PhotoManager.Migrator` | Applies migrations and database grants (Container Apps Job) | Update `RoleProvisioner` for new tables, and its web-editable photo columns when the web tier must update a new one (the API tests run as that role) |
 | `PhotoManager.Cli` | `photo-crypt` offline tool | Secrets from env vars or hidden prompt, never args |
 
 ## Code conventions
@@ -58,7 +58,12 @@ never read or print it).
 - Ownership (uploads, prepared downloads) and audit actors use the numeric GitHub id (`User.GitHubId()`), never
   the login. Photo endpoints only expose `Ready` photos.
 - Anything that records state and then starts a workflow must undo that state if Temporal is unreachable
-  (`TemporalUnavailable`), or the row stays "pending" forever.
+  (`TemporalUnavailable`), or the row stays "pending" forever. `PhotoWorkflowClient` starts are deliberately not
+  cancellable by the request (a closed tab must not abandon a start halfway); they time out instead.
+- The web tier's database role may update only `RoleProvisioner.WebEditablePhotoColumns` on `photos`; where a photo
+  is archived, its encryption, hash and owner are written by workers only. Workers decrypt an archive object only
+  if `ArchiveObjectKeys.BelongsTo` the photo, and ingest activities verify staged content against the inspected
+  hash. Job cancels always target a recorded run id, never a bare (reused) workflow id.
 
 ## Crypto rules
 

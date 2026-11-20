@@ -15,7 +15,14 @@ using PhotoManager.Infrastructure.Storage;
 using PhotoManager.Infrastructure.Temporal;
 
 var builder = WebApplication.CreateBuilder(args);
-builder.WebHost.ConfigureKestrel(kestrel => kestrel.AddServerHeader = false);
+builder.WebHost.ConfigureKestrel(kestrel =>
+{
+    kestrel.AddServerHeader = false;
+
+    // All API endpoints except POST /api/uploads take small JSON bodies; capping the global body limit
+    // prevents oversized payloads from allocating megabytes before endpoint validation runs.
+    kestrel.Limits.MaxRequestBodySize = 64 * 1024;
+});
 
 var credential = AzureCredentialFactory.Create(builder.Configuration);
 builder.Configuration.AddPhotoManagerKeyVault(credential);
@@ -66,6 +73,12 @@ app.UseStaticFiles(new StaticFileOptions
             ? "public, max-age=31536000, immutable"
             : "no-cache",
 });
+
+// The GitHub OAuth callback is answered inside UseAuthentication(), before the endpoint rate limiter below ever
+// runs, and each callback makes the server call GitHub. It gets its own per-IP limit, ahead of authentication.
+app.UseWhen(
+    context => context.Request.Path.StartsWithSegments(AuthenticationSetup.CallbackPath),
+    callback => callback.UseRateLimiter(RateLimitPolicies.OAuthCallbackOptions()));
 
 app.UseAuthentication();
 app.UseRateLimiter();

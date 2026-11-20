@@ -50,7 +50,7 @@ public static class JobEndpoints
             await db.Photos.CountAsync(p => p.Status == PhotoStatus.Missing, ct)));
     }
 
-    private static async Task<IResult> StartAsync(StartJobRequest request, HttpContext http, PhotoDbContext db, PhotoWorkflowClient workflows, AuditLog audit, CancellationToken ct)
+    private static async Task<IResult> StartAsync(StartJobRequest request, HttpContext http, PhotoDbContext db, PhotoWorkflowClient workflows, AuditLog audit, TimeProvider time, CancellationToken ct)
     {
         var workflowId = request.Kind switch
         {
@@ -75,28 +75,39 @@ public static class JobEndpoints
         await db.SaveChangesAsync(ct);
 
         var force = request.Force && request.Kind == JobKind.ReindexArchive;
+        string? runId;
         try
         {
-            job.RunId = request.Kind == JobKind.ReindexArchive
-                ? await workflows.StartReindexAsync(job.Id, force, ct)
-                : await workflows.StartBackfillAsync(job.Id, request.Kind, ct);
-            await db.SaveChangesAsync(CancellationToken.None);
+            // Not tied to this request (see PhotoWorkflowClient): once the row exists, a closed browser tab must not
+            // abandon the start halfway and leave a "Queued" job behind.
+            runId = request.Kind == JobKind.ReindexArchive
+                ? await workflows.StartReindexAsync(job.Id, force)
+                : await workflows.StartBackfillAsync(job.Id, request.Kind);
         }
         catch (WorkflowAlreadyStartedException)
         {
             // Recorded rather than deleted: the web identity has no DELETE privilege on any table.
-            job.Status = JobStatus.Cancelled;
-            job.Summary = "Not started: a job of this kind was already running.";
-            await db.SaveChangesAsync(CancellationToken.None);
+            await CloseUnstartedAsync(db, job.Id, JobStatus.Cancelled, "Not started: a job of this kind was already running.", time);
             return TypedResults.Problem(statusCode: StatusCodes.Status409Conflict, title: "A job of this kind is already running.");
         }
         catch (Exception ex) when (TemporalUnavailable.Matches(ex))
         {
-            // Never leave a "Queued" row behind that nothing will ever run (and that a later cancel could target).
-            job.Status = JobStatus.Failed;
-            job.Summary = "Not started: background processing is unavailable. Try again shortly.";
-            await db.SaveChangesAsync(CancellationToken.None);
+            // Never leave a "Queued" row behind that nothing will ever run. Should the start have reached Temporal
+            // after all, the run refuses to work on a job that is already closed (MaintenanceActivities.EnsureJob).
+            await CloseUnstartedAsync(db, job.Id, JobStatus.Failed, "Not started: background processing is unavailable. Try again shortly.", time);
             return TemporalUnavailable.Problem();
+        }
+
+        // The worker may already have picked the job up and marked it running (it records the same run id), which
+        // changed the row's version: a tracked save would fail with a concurrency error after the job had started.
+        // So only the run id is written, and only if nobody has written it yet.
+        if (runId is not null)
+        {
+            var now = time.GetUtcNow();
+            await db.Jobs.Where(j => j.Id == job.Id && j.RunId == null).ExecuteUpdateAsync(
+                s => s.SetProperty(j => j.RunId, runId)
+                      .SetProperty(j => j.UpdatedAt, now),
+                CancellationToken.None);
         }
 
         await audit.WriteAsync("job.start", job.Id.ToString(), new { kind = request.Kind.ToString(), force });
@@ -114,6 +125,28 @@ public static class JobEndpoints
         if (job.Status is not (JobStatus.Queued or JobStatus.Running))
         {
             return TypedResults.Problem(statusCode: StatusCodes.Status409Conflict, title: "The job is not running.");
+        }
+
+        if (job.RunId is null)
+        {
+            // No run was ever recorded, so the start never reached Temporal. Job workflow ids are reused, and a cancel
+            // without a run id would stop whatever job runs under this id now, so only the record is closed. A run
+            // that starts after all refuses to work on a closed job (MaintenanceActivities.EnsureJob).
+            var now = time.GetUtcNow();
+            var closed = await db.Jobs.Where(j => j.Id == id && j.RunId == null && (j.Status == JobStatus.Queued || j.Status == JobStatus.Running)).ExecuteUpdateAsync(
+                s => s.SetProperty(j => j.Status, JobStatus.Cancelled)
+                      .SetProperty(j => j.Summary, "Stopped before it started.")
+                      .SetProperty(j => j.CompletedAt, now)
+                      .SetProperty(j => j.UpdatedAt, now),
+                ct);
+            if (closed == 0)
+            {
+                // It started (and recorded its run) in the meantime.
+                return TypedResults.Problem(statusCode: StatusCodes.Status409Conflict, title: "The job has just started. Try again.");
+            }
+
+            await audit.WriteAsync("job.cancel", id.ToString(), null);
+            return TypedResults.Accepted((string?)null);
         }
 
         try
@@ -138,5 +171,17 @@ public static class JobEndpoints
 
         await audit.WriteAsync("job.cancel", id.ToString(), null);
         return TypedResults.Accepted((string?)null);
+    }
+
+    // Closes a job whose workflow never started. Conditional on Queued, so it never overwrites a status the worker set.
+    private static Task<int> CloseUnstartedAsync(PhotoDbContext db, Guid jobId, JobStatus status, string summary, TimeProvider time)
+    {
+        var now = time.GetUtcNow();
+        return db.Jobs.Where(j => j.Id == jobId && j.Status == JobStatus.Queued).ExecuteUpdateAsync(
+            s => s.SetProperty(j => j.Status, status)
+                  .SetProperty(j => j.Summary, summary)
+                  .SetProperty(j => j.CompletedAt, now)
+                  .SetProperty(j => j.UpdatedAt, now),
+            CancellationToken.None);
     }
 }

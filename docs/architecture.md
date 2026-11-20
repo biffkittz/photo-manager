@@ -156,7 +156,7 @@ worker revision is replaced on deploy. Incompatible workflow changes must use `W
 ```
 app/backend        .NET solution (Core, Data, Infrastructure, Api, Worker, Migrator, Cli + tests)
 app/frontend       Vue 3 + TypeScript SPA
-infra              Terraform: bootstrap (state, registry, CI identities), modules, environments/prod
+infra              Terraform: bootstrap (app and CI identities, access to the shared state and registry), modules, environments/prod
 docs               This documentation and architecture decision records (docs/adr)
 scripts            dev-secrets.sh, bootstrap-keyvault.sh
 .github            CI, CodeQL, Terraform and deploy workflows; Dependabot

@@ -48,7 +48,7 @@ const { state: downloadState, download } = useDownload()
 
 const editing = ref(false)
 const previewUrl = computed(() => urls.preview(props.id, photo.value?.renditionVersion ?? 0))
-const { status: previewStatus, markUnavailable } = useRendition(
+const { status: previewStatus, handleImageError } = useRendition(
   previewUrl,
   toRef(() => photo.value?.renditionState),
 )
@@ -151,7 +151,7 @@ async function describeAgain(): Promise<void> {
             :src="previewUrl"
             :alt="photo.description || `Photo ${photo.fileName}`"
             class="max-h-[75vh] max-w-full object-contain"
-            @error="markUnavailable"
+            @error="handleImageError"
           />
           <p v-else class="p-6 text-sm text-white">
             {{ previewStatus === 'pending' ? 'Preparing preview...' : 'Preview unavailable.' }}

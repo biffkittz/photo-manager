@@ -8,12 +8,14 @@ namespace PhotoManager.Worker.Workflows;
 
 /// <summary>
 /// Ingests one uploaded photo: inspect, then (concurrently) describe with Gemini and render thumbnails,
-/// then encrypt into the archive with the description sealed inside, then mark it ready.
+/// then encrypt into the archive with the description sealed inside, then mark it ready. An upload that cannot
+/// be fully decoded is rejected rather than archived.
 /// </summary>
 /// <remarks>
 /// Ordering is deliberate: the description must exist <em>before</em> the original is encrypted into the
 /// archive because it is embedded in the encrypted file. Description and renditions are best effort (a photo
-/// without them is still safely archived and can be backfilled later); archiving is not. Only identifiers
+/// without them is still safely archived and can be backfilled later), with one exception: an image the renderer
+/// cannot decode at all is rejected. Archiving is not best effort. Only identifiers
 /// cross Temporal; image bytes stay in storage (Temporal payload limit is 2 MB and history should stay small).
 /// </remarks>
 [Workflow(WorkflowTypes.PhotoIngest)]
@@ -52,11 +54,13 @@ public sealed class PhotoIngestWorkflow
             return await FinishAsync(photoId, PhotoStatus.Duplicate, "This photo is already in the library.", deleteStaging: true);
         }
 
+        // Everything read from staging from here on must hash to what was inspected (the web tier can write staging).
+        var staged = new StagedUploadInput(photoId, inspection.Sha256);
         var describeTask = Workflow.ExecuteActivityAsync(
-            (DescribeActivities a) => a.DescribeStagedUploadAsync(photoId),
+            (DescribeActivities a) => a.DescribeStagedUploadAsync(staged),
             ActivityProfiles.Describe(DescribeBudget));
         var renditionTask = Workflow.ExecuteActivityAsync(
-            (RenditionActivities a) => a.CreateRenditionsFromStagingAsync(photoId),
+            (RenditionActivities a) => a.CreateRenditionsFromStagingAsync(staged),
             ActivityProfiles.Renditions());
 
         DescribeResult? description = null;
@@ -73,6 +77,13 @@ public sealed class PhotoIngestWorkflow
         {
             await renditionTask;
         }
+        catch (ActivityFailureException ex) when (ActivityErrors.Is(ex, ActivityErrors.UnsupportedImage))
+        {
+            // The inspection only reads the header; rendering is the first full decode. An upload that cannot be
+            // decoded is corrupt or only pretends to be an image, so it is not archived: the upload fails and its
+            // staged copy is removed.
+            return await FinishAsync(photoId, PhotoStatus.Failed, ActivityErrors.UserMessage(ex), deleteStaging: true);
+        }
         catch (ActivityFailureException ex)
         {
             Workflow.Logger.LogWarning(ex, "Rendering photo {PhotoId} failed; continuing without renditions", photoId);
@@ -80,7 +91,7 @@ public sealed class PhotoIngestWorkflow
         }
 
         // Built outside the lambda: activity calls are expression trees, which cannot contain ?. or [].
-        var archiveInput = new ArchiveOriginalInput(photoId, description?.Description, description?.Tags ?? []);
+        var archiveInput = new ArchiveOriginalInput(photoId, inspection.Sha256, description?.Description, description?.Tags ?? []);
         ArchiveResult archived;
         try
         {

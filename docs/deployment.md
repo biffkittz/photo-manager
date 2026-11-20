@@ -44,13 +44,19 @@ Recommended before going live: create a **dedicated Wasabi access key** limited 
 
 ## 1. Bootstrap (once, from your workstation)
 
-Creates the app resource group and the two GitHub OIDC identities (deploy, plan) in their own resource group
-`rg-photo-cicd`, with least-privilege roles. Both identities get access to this project's state blobs
-(`photo.*`) in the shared `terraform` container and nothing else in it. On the shared registry, the deploy
-identity gets *AcrPush* plus the right to grant *AcrPull* (and only that) to the app identities, and the plan
-identity may read the registry and its role assignments. The only thing created in the registry is the weekly
-clean-up task for this project's images ([operations.md](operations.md#container-registry-storage)). The
-bootstrap's own state goes to `photo.bootstrap.tfstate`.
+Creates the app resource group, the app's three managed identities (web, worker, migrator) with their *AcrPull*
+on the shared registry, and the two GitHub OIDC identities (deploy, plan) in their own resource group
+`rg-photo-cicd`, with least-privilege roles:
+
+- Both CI identities can use the production state blob (`photo.terraform.tfstate`) in the shared `terraform`
+  container and nothing else in it, not even this bootstrap's own `photo.bootstrap.tfstate`. They get custom
+  roles (`photo-prod-terraform-state-writer`/`-reader`) that cannot delete or reconfigure the container.
+- On the shared registry the deploy identity gets *AcrPush* only; it cannot grant or remove roles there. The
+  only thing created in the registry is the weekly clean-up task for this project's images
+  ([operations.md](operations.md#container-registry-storage)).
+- The custom role `photo-prod-blob-data-writer` (read, write and delete blobs, no container rights) is what the
+  production configuration gives the apps on their storage containers.
+- The plan identity trusts pull requests and the `main` branch: on `main` it plans before an apply is approved.
 
 ```bash
 cp infra/bootstrap/terraform.tfvars.example infra/bootstrap/terraform.tfvars   # set subscription_id
@@ -63,10 +69,27 @@ If Azure rejects the storage role assignments' conditions (`scope_state_access_t
 to `false`: the identities then get the role on the whole `terraform` container. See
 [infra/README.md](../infra/README.md#state).
 
+Applied the production configuration before 2026-11-20? Back then it created the app identities itself. Move
+them to the bootstrap before applying either configuration again (these commands change only Terraform's
+records, not Azure):
+
+```bash
+for t in web worker migrator; do
+  terraform -chdir=infra/environments/prod state rm "azurerm_user_assigned_identity.app[\"$t\"]" "azurerm_role_assignment.acr_pull[\"$t\"]"
+  terraform -chdir=infra/bootstrap import "azurerm_user_assigned_identity.app[\"$t\"]" \
+    "/subscriptions/<subscription-id>/resourceGroups/rg-photo-prod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-photo-prod-$t"
+done
+```
+
+If the bootstrap apply then reports that an *AcrPull* assignment already exists, delete the old one and apply
+again: `az role assignment delete --role AcrPull --assignee <identity client id> --scope <registry id>`.
+
 ## 2. GitHub repository configuration
 
 *Settings > Environments*: create **production**; add yourself as a **required reviewer** (every apply and
-deploy then waits for approval) and restrict it to the `main` branch.
+deploy then waits for approval) and add a deployment branch rule that allows only `main`. The workflows also
+refuse to run production jobs for other branches, but a branch can edit its own copy of a workflow, so this
+rule is what actually enforces it.
 
 *Settings > Secrets and variables > Actions*:
 
@@ -177,10 +200,10 @@ Now copy the final `terraform.tfvars` into the `TF_VARS_PROD` GitHub variable (s
 flowchart LR
   pr[Pull request] --> ci[CI: build, tests, E2E, image scan, gitleaks, terraform validate] --> codeql[CodeQL]
   pr --> plan[Terraform plan (read-only identity, -lock=false)]
-  main[Merge to main] --> ci2[CI] --> deploy{{Deploy: approval}}
+  main[Merge to main] --> ci2[CI] --> newest[Still the newest commit on main?] --> deploy{{Deploy: approval}}
   deploy --> push[Build release images + SBOM/provenance, push to ACR]
   push --> migrate[Migration job] --> worker[Roll out worker, wait until healthy] --> web[Roll out web, wait until healthy] --> smoke[Smoke test]
-  main --> apply{{Terraform apply: approval}}
+  main --> planmain[Terraform plan, shown in the run summary] --> apply{{Terraform apply: approval, only the same plan}}
 ```
 
 - Images are tagged `sha-<commit>`; Terraform ignores image changes, so infrastructure applies never roll
@@ -191,8 +214,13 @@ flowchart LR
   (same for the worker). Migrations are forward-only; write backwards-compatible migrations (expand, then
   contract in a later release).
 - Temporal workflow code changes must stay replay-compatible (see `app/backend/CLAUDE.md`).
-- The apply job plans and applies in one approved run. Before approving, compare with the pull request's plan;
-  if anything changed in Azure meanwhile (drift), the apply's plan output shows it.
+- Terraform on `main`: the **plan-main** job plans with the read-only identity and puts the full plan in the run
+  summary *before* the **apply** job asks for approval. Read it, then approve. The apply job plans again with the
+  deploy identity and applies only if that plan makes exactly the same changes; if Azure or the state changed
+  in between, it stops without applying and you re-run the workflow to review the new plan.
+- Only the newest commit on `main` is deployed: a run whose commit is no longer the tip of `main` is skipped
+  before approval and fails after approval (the newer commit is deployed by its own run). Roll back deliberately
+  as described above, never by re-running an old deployment.
 
 ## Cost notes (approximate, per month)
 

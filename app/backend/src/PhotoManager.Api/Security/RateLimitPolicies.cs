@@ -1,4 +1,5 @@
 using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.RateLimiting;
 using PhotoManager.Api.Auth;
 
 namespace PhotoManager.Api.Security;
@@ -6,6 +7,8 @@ namespace PhotoManager.Api.Security;
 /// <summary>Per-user (or per-IP when anonymous) rate limits.</summary>
 public static class RateLimitPolicies
 {
+    private const int AuthPermitsPerMinute = 30;
+
     /// <summary>General API traffic (the gallery requests many thumbnails).</summary>
     public const string Api = "api";
 
@@ -25,17 +28,33 @@ public static class RateLimitPolicies
         services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-            options.OnRejected = (context, _) =>
-            {
-                context.HttpContext.Response.Headers.RetryAfter = "10";
-                return ValueTask.CompletedTask;
-            };
+            options.OnRejected = OnRejected;
 
             options.AddPolicy(Api, http => Window(http, 1200, TimeSpan.FromMinutes(1)));
-            options.AddPolicy(Auth, http => Window(http, 30, TimeSpan.FromMinutes(1)));
+            options.AddPolicy(Auth, http => Window(http, AuthPermitsPerMinute, TimeSpan.FromMinutes(1)));
             options.AddPolicy(Upload, http => Window(http, 300, TimeSpan.FromMinutes(1)));
             options.AddPolicy(Expensive, http => Window(http, 30, TimeSpan.FromMinutes(1)));
         });
+
+    /// <summary>
+    /// Options for the limiter in front of the GitHub OAuth callback. The callback is handled by the authentication
+    /// middleware, so endpoint policies never see it; this limiter runs before authentication and therefore always
+    /// partitions by client IP. Each callback costs the server a request to GitHub (and, for accounts that are not
+    /// allowed, an audit row), so it gets the same budget as the other sign-in endpoints.
+    /// </summary>
+    /// <returns>Options with a global per-IP limiter.</returns>
+    public static RateLimiterOptions OAuthCallbackOptions() => new()
+    {
+        RejectionStatusCode = StatusCodes.Status429TooManyRequests,
+        OnRejected = OnRejected,
+        GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(http => Window(http, AuthPermitsPerMinute, TimeSpan.FromMinutes(1))),
+    };
+
+    private static ValueTask OnRejected(OnRejectedContext context, CancellationToken cancellationToken)
+    {
+        context.HttpContext.Response.Headers.RetryAfter = "10";
+        return ValueTask.CompletedTask;
+    }
 
     private static RateLimitPartition<string> Window(HttpContext http, int permits, TimeSpan window)
     {

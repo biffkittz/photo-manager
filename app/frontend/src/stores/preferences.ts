@@ -4,6 +4,11 @@ import type { GallerySort } from '@/api/types'
 
 export type GridDensity = 'comfortable' | 'compact'
 
+const allowed: Record<string, readonly unknown[]> = {
+  density: ['comfortable', 'compact'] satisfies GridDensity[],
+  sort: ['uploaded', 'taken'] satisfies GallerySort[],
+}
+
 /** Non-sensitive UI preferences, persisted to localStorage by the persist plugin. */
 export const usePreferencesStore = defineStore(
   'preferences',
@@ -17,5 +22,11 @@ export const usePreferencesStore = defineStore(
 
     return { density, sort, toggleDensity }
   },
-  { persist: { key: 'photo-manager.preferences', pick: ['density', 'sort'] } },
+  {
+    persist: {
+      key: 'photo-manager.preferences',
+      pick: ['density', 'sort'],
+      validate: (key, value) => allowed[key]?.includes(value) ?? false,
+    },
+  },
 )

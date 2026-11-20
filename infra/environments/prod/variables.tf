@@ -45,12 +45,6 @@ variable "container_registry_name" {
   }
 }
 
-variable "container_registry_resource_group" {
-  description = "Resource group of the existing container registry (same subscription)."
-  type        = string
-  default     = "rg-loginapp-demo"
-}
-
 variable "container_registry_login_server" {
   description = "Login server of the registry; empty means <name>.azurecr.io. Set it only if the registry uses a domain name label (login server with a hash suffix)."
   type        = string

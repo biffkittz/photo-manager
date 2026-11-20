@@ -5,7 +5,7 @@ Step-by-step first deployment: [docs/deployment.md](../docs/deployment.md).
 
 ```
 infra/
-  bootstrap/            one-time: resource groups, GitHub OIDC identities and their access to shared resources
+  bootstrap/            one-time: resource groups, app and GitHub OIDC identities, their access to shared resources
   environments/prod/    the production composition (remote state, providers, module wiring)
   modules/              reusable building blocks, one concern each (network, key-vault, storage, ...)
   .terraform-docs.yml   generates the Inputs/Outputs sections of every README
@@ -13,7 +13,7 @@ infra/
 
 | Directory | What it creates | README |
 |---|---|---|
-| `bootstrap` | `rg-photo-prod`, deploy/plan identities (in `rg-photo-cicd`) and their roles, including scoped access to the shared state and registry | [bootstrap/README.md](bootstrap/README.md) |
+| `bootstrap` | `rg-photo-prod`; the web/worker/migrator identities with registry pull access; the custom blob role the apps get; deploy/plan identities (in `rg-photo-cicd`) and their roles, including scoped access to the shared state and registry | [bootstrap/README.md](bootstrap/README.md) |
 | `environments/prod` | Everything else (about a dozen module calls) | [environments/prod/README.md](environments/prod/README.md) |
 | `modules/network` | VNet, subnets, NSGs, private DNS zones | [README](modules/network/README.md) |
 | `modules/observability` | Log Analytics, Application Insights (Entra-only ingestion) | [README](modules/observability/README.md) |
@@ -57,12 +57,15 @@ Who can touch the state:
 - **You** (workstation): *Storage Blob Data Contributor* on the `terraform` container, granted once by hand
   (command in [docs/deployment.md](../docs/deployment.md#0-before-you-start)); it has to exist before the
   bootstrap can even initialize.
-- **Deploy identity** (approved applies): *Storage Blob Data Contributor*, **Plan identity** (pull-request
-  plans, run with `-lock=false`): *Storage Blob Data Reader*. Both assignments carry an ABAC condition that
-  limits them to blobs whose names start with `photo.` (`state_blob_prefix`), so CI cannot read or change
-  other projects' state in the shared container. If Azure ever rejects these conditions for the account,
-  set `scope_state_access_to_prefix = false` in the bootstrap (container-wide access) and consider a dedicated
-  container instead.
+- **Deploy identity** (approved applies): custom role `photo-prod-terraform-state-writer`, **Plan identity**
+  (plans, run with `-lock=false`): custom role `photo-prod-terraform-state-reader`. Both are defined by the
+  bootstrap in the state account's resource group and hold blob data actions only (plus reading container
+  properties): unlike the built-in *Storage Blob Data* roles they cannot delete or reconfigure the container,
+  which no assignment condition could prevent. Both assignments carry an ABAC condition that limits them to
+  blobs whose names start with `photo.terraform.tfstate` (`state_blob_prefix`), so CI can neither read nor
+  change other projects' state, nor the bootstrap's own `photo.bootstrap.tfstate`. If Azure ever rejects these
+  conditions for the account, set `scope_state_access_to_prefix = false` in the bootstrap (container-wide
+  access) and consider a dedicated container instead.
 
 State still contains sensitive attributes that providers export (for example the app storage account's access
 keys, unusable because shared-key access is disabled), which is why access to it is this narrow.
@@ -70,21 +73,20 @@ keys, unusable because shared-key access is disabled), which is why access to it
 ## Container registry
 
 Images go to the existing registry **`crloginappdemo7fyguj`** in `rg-loginapp-demo`, shared with the login app
-(`container_registry_name` / `container_registry_resource_group`, defaults in both configurations). This
+(`container_registry_name` in both configurations, `container_registry_resource_group` in the bootstrap). This
 project's repositories are `photo-web`, `photo-worker` and `photo-migrator`.
 
 - Neither configuration creates, changes or reads the registry resource itself (only the clean-up task below
   is added to it). Both refer to it by name: a data
   source would copy the registry's admin password (if the admin user is enabled) into this project's state. The
   login server is assumed to be `<name>.azurecr.io`; set `container_registry_login_server` if it differs.
-- The deploy identity has *AcrPush* on the registry and may assign or remove *AcrPull* there (only that role,
-  never for itself). Production gives the web, worker and migrator identities *AcrPull*.
+- The deploy identity has *AcrPush* on the registry and no right to grant or remove roles there. The bootstrap
+  (run by you) creates the web, worker and migrator identities and gives them *AcrPull*; the production
+  configuration only looks the identities up by name and never touches the registry.
 - Both of those built-in roles apply to the whole registry, including the login app's repositories.
   Repository-level permissions would require switching the registry to ABAC repository permissions, which
   changes how the login app's existing role assignments work, so that was not done. See
   [docs/security.md](../docs/security.md) (residual risks).
-- The plan identity has a custom role on the registry: read the registry and its role assignments, but not
-  pull images.
 - `infra/bootstrap` adds one ACR task to the registry, `photo-manager-image-cleanup`: every Sunday it deletes
   this project's image tags older than 30 days except the 10 newest, then the image data no tag refers to. Its
   repository filter (`photo-(web|worker|migrator)`) must match whole repository names, so it never selects the

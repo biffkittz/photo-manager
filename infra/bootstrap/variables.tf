@@ -108,18 +108,23 @@ variable "state_container_name" {
 }
 
 variable "state_blob_prefix" {
-  description = "Prefix of this project's state blobs in the shared container; CI identities can only touch these."
+  description = "Blob-name prefix the CI identities may use in the shared state container. The default covers only the production state (photo.terraform.tfstate and its workspace states), not this configuration's own photo.bootstrap.tfstate."
   type        = string
-  default     = "photo."
+  default     = "photo.terraform.tfstate"
 
   validation {
-    condition     = can(regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,40}$", var.state_blob_prefix))
-    error_message = "state_blob_prefix must be a short blob-name prefix (letters, digits, '.', '_', '-')."
+    condition     = can(regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$", var.state_blob_prefix))
+    error_message = "state_blob_prefix must be a blob-name prefix (letters, digits, '.', '_', '-')."
+  }
+
+  validation {
+    condition     = !startswith("photo.bootstrap.tfstate", var.state_blob_prefix)
+    error_message = "state_blob_prefix must not match photo.bootstrap.tfstate: CI must not be able to read or change the bootstrap state."
   }
 }
 
 variable "scope_state_access_to_prefix" {
-  description = "Limit the CI identities' state access to blobs named state_blob_prefix* with an ABAC condition. Set false only if the condition is rejected for the state account."
+  description = "Limit the CI identities' state access to blobs named state_blob_prefix* with an ABAC condition. Set false only if the condition is rejected for the state account (CI could then use every blob in the container)."
   type        = bool
   default     = true
 }

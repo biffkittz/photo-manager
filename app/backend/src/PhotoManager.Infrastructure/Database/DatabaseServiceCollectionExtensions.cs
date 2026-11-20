@@ -10,6 +10,9 @@ namespace PhotoManager.Infrastructure.Database;
 /// <summary>Registers the PostgreSQL data source and <see cref="PhotoDbContext"/>.</summary>
 public static class DatabaseServiceCollectionExtensions
 {
+    /// <summary>How often the Entra token used as the PostgreSQL password is refreshed (below Azure.Identity's 5-minute margin).</summary>
+    public static readonly TimeSpan EntraTokenRefreshInterval = TimeSpan.FromMinutes(4);
+
     private static readonly string[] EntraScopes = ["https://ossrdbms-aad.database.windows.net/.default"];
 
     /// <summary>
@@ -51,13 +54,17 @@ public static class DatabaseServiceCollectionExtensions
         var builder = new NpgsqlDataSourceBuilder(options.ConnectionString);
         if (options.UseEntraAuthentication)
         {
+            // Npgsql keeps using the token it fetched until the next refresh, while Azure.Identity only promises
+            // that a token it returns is valid for a few more minutes (it refreshes cached tokens 5 minutes before
+            // they expire). Refreshing more often than that margin means a new connection never presents an
+            // expired token. It costs nothing: Azure.Identity answers from its in-memory cache until then.
             builder.UsePeriodicPasswordProvider(
                 async (_, cancellationToken) =>
                 {
                     var token = await credential.GetTokenAsync(new TokenRequestContext(EntraScopes), cancellationToken).ConfigureAwait(false);
                     return token.Token;
                 },
-                successRefreshInterval: TimeSpan.FromMinutes(30),
+                successRefreshInterval: EntraTokenRefreshInterval,
                 failureRefreshInterval: TimeSpan.FromSeconds(10));
         }
 

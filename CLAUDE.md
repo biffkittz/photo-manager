@@ -37,16 +37,21 @@ PostgreSQL, Key Vault, Terraform. Site: `photo.biffkittz.com`.
   gitignored; never read or print it) or env `SixLaborsLicenseKey`; Docker: `--secret id=sixlabors_license_key,src=sixlabors.lic`.
 - Never use `pkill -f <pattern>` from the agent shell (it matches its own command line); kill by PID.
 
-## Status (2026-11-19)
-v1 plus all confirmed Gemini-review fixes, verified locally; nothing is deployed or committed yet. Tests: backend
-135 (Core 69, Worker 40, Api 23, Integration 3), frontend lint/format/types + 30 unit + 5 E2E. Terraform state uses
-the owner's existing account (`rg-terraform-state`/`demonstration`/`terraform`, keys `photo.*.tfstate`, Entra
-auth; docs/adr/0009). Images go to the owner's existing registry `crloginappdemo7fyguj` (`rg-loginapp-demo`, shared
-with the login app; repositories `photo-*`; docs/adr/0011). Duplicates are hidden, never deleted (docs/adr/0010).
+## Status (2026-11-20)
+v1 plus the confirmed fixes of the 2026-11-19 review and of the High findings of the 2026-11-20 security review,
+verified locally; nothing is deployed, and the 2026-11-20 changes are not committed yet. Tests: backend 161
+(Core 73, Worker 52, Api 31 running as the least-privileged web database role, Integration 5), frontend
+lint/format/types + 46 unit + 6 E2E. Terraform state uses the owner's existing account
+(`rg-terraform-state`/`demonstration`/`terraform`; CI limited to `photo.terraform.tfstate` by custom roles + ABAC;
+docs/adr/0009). Images go to the owner's existing registry `crloginappdemo7fyguj` (`rg-loginapp-demo`, shared with
+the login app; repositories `photo-*`; the app identities and their *AcrPull* live in `infra/bootstrap`;
+docs/adr/0011). Duplicates are hidden, never deleted (docs/adr/0010). Workers cap downloads at 2,000 photos a day
+(docs/adr/0001).
 
 The user chose to skip a scan of the real archive for duplicates (2026-11-19): in-app hiding during the thumbnail
 backfill covers it. A weekly ACR task deletes old `photo-*` images (infra/bootstrap). Still to check on the first
-deploy: the state ABAC condition, Cloudflare TXT quoting, Temporal namespace API-key auth.
+deploy: the state ABAC condition and the custom state roles defined in `rg-terraform-state`, that `plan-main` and
+`apply` produce the same plan fingerprint, Cloudflare TXT quoting, Temporal namespace API-key auth.
 
 Per-area rules: `app/backend/CLAUDE.md`, `app/frontend/CLAUDE.md`, `infra/CLAUDE.md`. Docs: `docs/` (architecture,
 development, deployment, operations, encryption, security, ADRs). CI/CD: `.github/workflows`.

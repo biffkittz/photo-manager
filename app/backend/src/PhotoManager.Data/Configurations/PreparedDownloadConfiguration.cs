@@ -19,5 +19,6 @@ internal sealed class PreparedDownloadConfiguration : IEntityTypeConfiguration<P
         builder.Property(d => d.Error).HasMaxLength(500);
         builder.Property(d => d.Version).IsRowVersion();
         builder.HasIndex(d => new { d.RequestedBy, d.CreatedAt }).IsDescending(false, true);
+        builder.HasIndex(d => d.PreparedAt).HasFilter("prepared_at IS NOT NULL");
     }
 }

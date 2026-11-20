@@ -73,7 +73,7 @@ public sealed class IngestActivities(
     /// archive. The plaintext is streamed from staging and hashed on the way; a hash mismatch with the
     /// inspected content aborts the write.
     /// </summary>
-    /// <param name="input">Photo id plus the description to embed.</param>
+    /// <param name="input">Photo id, the inspected content hash and the description to embed.</param>
     /// <returns>The stored object.</returns>
     [Activity("ArchiveOriginal")]
     public async Task<ArchiveResult> ArchiveOriginalAsync(ArchiveOriginalInput input)
@@ -82,6 +82,11 @@ public sealed class IngestActivities(
         var ct = ActivityExecutionContext.Current.CancellationToken;
         try
         {
+            if (string.IsNullOrEmpty(input.ExpectedSha256))
+            {
+                throw ActivityErrors.Permanent(ActivityErrors.InvalidState, "The upload has not been inspected.");
+            }
+
             var photo = await db.Photos.AsNoTracking().SingleOrDefaultAsync(p => p.Id == input.PhotoId, ct)
                 ?? throw ActivityErrors.Permanent(ActivityErrors.NotFound, "The photo record does not exist.");
             var key = ArchiveObjectKeys.ForV2(photo.Id, photo.UploadedAt);
@@ -91,7 +96,7 @@ public sealed class IngestActivities(
                 OriginalFileName = photo.OriginalFileName,
                 ContentType = photo.ContentType,
                 SizeBytes = photo.SizeBytes ?? 0,
-                Sha256 = photo.Sha256,
+                Sha256 = input.ExpectedSha256,
                 Description = input.Description,
                 Tags = input.Tags,
                 TakenAt = photo.TakenAt,
@@ -119,9 +124,11 @@ public sealed class IngestActivities(
                         actualHash = await CopyAndHashAsync(plaintext, encryptor, options.Value.MaxPlaintextBytes, ct);
                     }
 
-                    if (photo.Sha256 is not null && !string.Equals(actualHash, photo.Sha256, StringComparison.Ordinal))
+                    // Compared with the hash the inspection computed (passed through the workflow), not with the
+                    // database row, which the web tier writes when the upload starts.
+                    if (!string.Equals(actualHash, input.ExpectedSha256, StringComparison.Ordinal))
                     {
-                        throw ActivityErrors.Permanent(ActivityErrors.InvalidState, "The staged upload changed after it was inspected.");
+                        throw PlaintextLoader.StagedContentChanged();
                     }
 
                     await encryptor.CompleteAsync(ct);

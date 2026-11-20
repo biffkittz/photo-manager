@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using PhotoManager.Api.Audit;
 using PhotoManager.Api.Auth;
+using PhotoManager.Api.Downloads;
 using PhotoManager.Api.Security;
 using PhotoManager.Api.Uploads;
 using PhotoManager.Infrastructure.Configuration;
@@ -28,6 +29,12 @@ public static class ApiServiceCollectionExtensions
 
         services.AddOptions<BlobStorageOptions>().BindConfiguration(BlobStorageOptions.SectionName);
         services.AddOptions<UploadOptions>().BindConfiguration(UploadOptions.SectionName);
+        services.AddOptions<DownloadOptions>()
+            .BindConfiguration(DownloadOptions.SectionName)
+            .Validate(o => o.MaxPhotosPerDownload > 0, "Downloads:MaxPhotosPerDownload must be positive.")
+            .Validate(o => o.MaxDownloadBytes > 0, "Downloads:MaxDownloadBytes must be positive.")
+            .Validate(o => o.MaxPendingDownloadsPerUser > 0, "Downloads:MaxPendingDownloadsPerUser must be positive.")
+            .ValidateOnStart();
         services.AddSingleton<AzureBlobStore>();
         services.AddSingleton<IBlobStore>(sp => sp.GetRequiredService<AzureBlobStore>());
         services.AddScoped<UploadService>();

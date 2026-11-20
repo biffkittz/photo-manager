@@ -35,7 +35,10 @@ done
 | Generate missing thumbnails | Decrypts archived photos on the workers and creates renditions; also records dimensions, capture date and content hash for legacy photos, and hides byte-identical copies (see [Duplicates](#duplicates)) | After the first re-index; failed photos can be retried by running it again |
 | Generate missing descriptions | Gemini descriptions for photos without one. Never replaces a description someone wrote by hand | Optional; consumes Gemini quota (roughly one photo per second across workers, about 80 s each) |
 
-Jobs can be cancelled from the Actions page. Progress is visible there and in the Temporal UI.
+Jobs can be cancelled from the Actions page. Progress is visible there and in the Temporal UI. A job whose
+start never reached Temporal (it shows "Queued" with no run) is simply closed by a cancel; a cancel is never
+sent to whatever later job reuses the same workflow id, and a run that starts after its job was closed stops
+immediately.
 
 ### Missing photos and the safety limit
 
@@ -65,11 +68,41 @@ SELECT original_file_name, archive_key, status_detail FROM photos WHERE status =
 Removing them from the bucket is optional and manual. Bucket versioning is on, so a deleted object can be
 restored, but prefer leaving them: they cost little and the app already hides them.
 
+Rebuilding the database from the archive (a re-index after losing it) records duplicates the same way: of two
+archive files with identical content, one photo is ready and the other is `Duplicate`.
+
+## Downloads and the daily limit
+
+The workers prepare at most **2,000 photos per 24 hours for everyone together** (`Worker:MaxDownloadPhotosPerDay`);
+beyond that a download fails with a message saying so. This bounds how fast originals can leave the archive,
+even through a compromised web tier ([ADR 0001](adr/0001-split-keys.md)). Each prepared download is logged by
+the worker (`Prepared download ... for GitHub user ...`) and every refusal as a warning; both are in Application
+Insights traces. To allow a large one-off export, raise the setting on the worker app temporarily:
+
+```bash
+az containerapp update -g rg-photo-prod -n ca-photo-worker --set-env-vars Worker__MaxDownloadPhotosPerDay=10000
+```
+
+Per download: at most 500 photos and 4 GB (`Worker:MaxPhotosPerDownload`, `Worker:MaxDownloadBytes`, and the
+same limits in the API's `Downloads` section, plus 3 downloads in preparation per person).
+
+## Image processing limits
+
+- Only JPEG, PNG, GIF and WebP are decoded, for uploads and for archive files alike. Legacy files in other
+  formats are listed but get no thumbnails.
+- An upload that passes the quick header check but cannot be fully decoded (corrupt, or not really an image)
+  fails with a message on the Uploads page and is **not** archived.
+- Each worker decodes at most 2 images at a time (`Imaging:MaxConcurrentDecodes`) and ImageSharp may hold at
+  most 1 GB (`Imaging:DecodeMemoryLimitMegabytes`); beyond that a decode fails and Temporal retries it later,
+  instead of the container running out of memory. Raise both only together with the worker's memory.
+
 ## Sessions
 
 Sign-in sessions end after 8 hours without activity (`Auth:SessionLifetime`) and in any case 24 hours after
 signing in with GitHub (`Auth:MaxSessionLifetime`); removing someone from `github_users` ends their session on
-their next request.
+their next request. Signing out (or the session ending) in one browser tab ends it in the browser's other tabs
+of the app as well, and a tab re-checks the session when it comes back to the foreground. The GitHub sign-in
+callback accepts at most 30 requests a minute per IP address.
 
 ## Container registry storage
 
@@ -107,7 +140,8 @@ would delete. `registry_cleanup_enabled = false` removes the task.
 
 Suggested alerts (Temporal worker alerting guidance): pollers at zero for 5 minutes; activity
 schedule-to-start p99 above 30 minutes; workflow task failures (non-determinism); any `auth.denied` burst;
-Key Vault secret reads by an unexpected identity; 5xx rate on the web app.
+Key Vault secret reads by an unexpected identity; 5xx rate on the web app; any `refused: ... photos were prepared
+in the last 24 hours` warning from the worker (the daily download limit was reached).
 
 ## Error reporting
 

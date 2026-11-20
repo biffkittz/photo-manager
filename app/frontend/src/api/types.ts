@@ -110,6 +110,8 @@ export interface LibraryOverview {
 
 /** RFC 9457 problem details returned by the API for errors. */
 export interface ProblemDetails {
+  /** Machine-readable kind of problem (for example the CSRF rejection, see `CSRF_PROBLEM_TYPE`). */
+  type?: string
   title?: string
   status?: number
   detail?: string

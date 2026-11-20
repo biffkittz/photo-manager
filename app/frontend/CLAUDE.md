@@ -34,6 +34,11 @@ npm audit                        # must stay at 0 vulnerabilities (overrides in 
   and the viewer, `aria-live` for async status.
 - Errors: user-facing notifications via the notifications store; no third-party error reporting
   (see `src/plugins/errorHandler.ts` and docs/operations.md#error-reporting).
-- Session end (sign-out, 401): `auth.onSessionEnded` listeners (registered in `main.ts`) clear the Vue Query
-  cache and the upload queue. Requests made outside `apiFetch` must call `notifyUnauthorized()` on 401.
+- Session end (sign-out, 401, a session check answering "signed out", or another tab, via the
+  `photo-manager-auth` BroadcastChannel): `auth.onSessionEnded` listeners (registered in `main.ts`) clear the Vue
+  Query cache and the upload queue and leave pages that need a session for sign-in. A session check that gets no
+  answer concludes nothing (`auth.loaded` stays false; the sign-in page shows `error=unavailable`). Requests
+  made outside `apiFetch` must call `notifyUnauthorized()` on 401, and on a CSRF rejection (`isCsrfProblem`) call
+  `refreshCsrfToken()` and retry once, as `apiFetch` does.
+- Persisted preferences (`persist` store option) are untrusted input: list them in `pick` and add a `validate`.
 - `.npmrc` sets `ignore-scripts=true`: dependencies never run install scripts.

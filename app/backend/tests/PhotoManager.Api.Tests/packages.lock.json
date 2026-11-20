@@ -714,6 +714,13 @@
           "Temporalio.Extensions.OpenTelemetry": "[1.22.0, )"
         }
       },
+      "photomanager.migrator": {
+        "type": "Project",
+        "dependencies": {
+          "PhotoManager.Data": "[1.0.0, )",
+          "PhotoManager.Infrastructure": "[1.0.0, )"
+        }
+      },
       "AspNet.Security.OAuth.GitHub": {
         "type": "CentralTransitive",
         "requested": "[11.0.0, )",

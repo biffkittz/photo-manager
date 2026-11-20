@@ -5,11 +5,15 @@ locals {
   suffix              = var.name_suffix != "" ? var.name_suffix : substr(sha1("${var.subscription_id}-${var.project}"), 0, 6)
   resource_group_name = var.resource_group_name != "" ? var.resource_group_name : "rg-${local.name}"
 
-  # The existing, shared container registry, referenced by name: a data source would copy its admin password
-  # (if the admin user is enabled) into this configuration's state.
-  registry_id           = "/subscriptions/${var.subscription_id}/resourceGroups/${var.container_registry_resource_group}/providers/Microsoft.ContainerRegistry/registries/${var.container_registry_name}"
+  # The existing, shared container registry. Only its login server is needed here: the app identities' pull
+  # access is granted by infra/bootstrap, and a data source would copy the registry's admin password (if the
+  # admin user is enabled) into this configuration's state.
   registry_login_server = var.container_registry_login_server != "" ? var.container_registry_login_server : "${lower(var.container_registry_name)}.azurecr.io"
   temporal_namespace    = "${var.temporal_namespace_name}.${var.temporal_account_id}"
+
+  # Custom role defined by infra/bootstrap: read, write and delete blobs, but no container management and no
+  # undelete (which the built-in Storage Blob Data Contributor would allow).
+  blob_data_writer_role = "${var.project}-${var.environment}-blob-data-writer"
   tags = merge(var.tags, {
     project     = var.project
     environment = var.environment
@@ -23,7 +27,7 @@ locals {
 
   # Passwordless connections: the username is the identity's PostgreSQL role, the password an Entra token.
   connection_strings = {
-    for tier, identity in azurerm_user_assigned_identity.app :
+    for tier, identity in data.azurerm_user_assigned_identity.app :
     tier => "Host=${module.postgres.fqdn};Port=5432;Database=${module.postgres.database_name};Username=${identity.name};SslMode=VerifyFull"
   }
 
@@ -54,28 +58,17 @@ data "azurerm_resource_group" "app" {
 }
 
 # ---------------------------------------------------------------------------------------------------
-# Identities: one per tier, so each gets only the rights its tier needs.
+# Identities: one per tier, so each gets only the rights its tier needs. infra/bootstrap creates them and
+# grants their pull access to the shared registry; this configuration grants everything else.
 # ---------------------------------------------------------------------------------------------------
-resource "azurerm_user_assigned_identity" "app" {
+data "azurerm_user_assigned_identity" "app" {
   for_each            = toset(["web", "worker", "migrator"])
   name                = "id-${local.name}-${each.key}"
   resource_group_name = data.azurerm_resource_group.app.name
-  location            = var.location
-  tags                = local.tags
-}
-
-# Pull access to the shared registry (the deploy identity may grant AcrPull there, and only that; see
-# infra/bootstrap).
-resource "azurerm_role_assignment" "acr_pull" {
-  for_each             = azurerm_user_assigned_identity.app
-  scope                = local.registry_id
-  role_definition_name = "AcrPull"
-  principal_id         = each.value.principal_id
-  principal_type       = "ServicePrincipal"
 }
 
 resource "azurerm_role_assignment" "telemetry" {
-  for_each             = { for tier in ["web", "worker"] : tier => azurerm_user_assigned_identity.app[tier] }
+  for_each             = { for tier in ["web", "worker"] : tier => data.azurerm_user_assigned_identity.app[tier] }
   scope                = module.observability.application_insights_id
   role_definition_name = "Monitoring Metrics Publisher"
   principal_id         = each.value.principal_id
@@ -114,8 +107,8 @@ module "key_vault_web" {
   private_dns_zone_id         = module.network.key_vault_dns_zone_id
   admin_ip_ranges             = var.admin_ip_ranges
   admin_object_ids            = var.key_vault_admin_object_ids
-  secret_reader_principal_ids = { web = azurerm_user_assigned_identity.app["web"].principal_id }
-  crypto_user_principal_ids   = { web = azurerm_user_assigned_identity.app["web"].principal_id }
+  secret_reader_principal_ids = { web = data.azurerm_user_assigned_identity.app["web"].principal_id }
+  crypto_user_principal_ids   = { web = data.azurerm_user_assigned_identity.app["web"].principal_id }
   log_analytics_workspace_id  = module.observability.log_analytics_workspace_id
   tags                        = local.tags
 }
@@ -131,7 +124,7 @@ module "key_vault_worker" {
   private_dns_zone_id         = module.network.key_vault_dns_zone_id
   admin_ip_ranges             = var.admin_ip_ranges
   admin_object_ids            = var.key_vault_admin_object_ids
-  secret_reader_principal_ids = { worker = azurerm_user_assigned_identity.app["worker"].principal_id }
+  secret_reader_principal_ids = { worker = data.azurerm_user_assigned_identity.app["worker"].principal_id }
   log_analytics_workspace_id  = module.observability.log_analytics_workspace_id
   tags                        = local.tags
 }
@@ -146,15 +139,16 @@ module "storage" {
   tags                       = local.tags
 
   # Least privilege per container: the web tier can write staged uploads and its key ring but only read
-  # renditions and prepared downloads; the workers produce renditions and downloads.
+  # renditions and prepared downloads; the workers produce renditions and downloads. Writers get the custom
+  # blob role (no container management, no undelete of soft-deleted blobs).
   container_role_assignments = {
-    web_staging        = { container = "staging", principal_id = azurerm_user_assigned_identity.app["web"].principal_id, role = "Storage Blob Data Contributor" }
-    web_renditions     = { container = "renditions", principal_id = azurerm_user_assigned_identity.app["web"].principal_id, role = "Storage Blob Data Reader" }
-    web_downloads      = { container = "downloads", principal_id = azurerm_user_assigned_identity.app["web"].principal_id, role = "Storage Blob Data Reader" }
-    web_dataprotection = { container = "dataprotection", principal_id = azurerm_user_assigned_identity.app["web"].principal_id, role = "Storage Blob Data Contributor" }
-    worker_staging     = { container = "staging", principal_id = azurerm_user_assigned_identity.app["worker"].principal_id, role = "Storage Blob Data Contributor" }
-    worker_renditions  = { container = "renditions", principal_id = azurerm_user_assigned_identity.app["worker"].principal_id, role = "Storage Blob Data Contributor" }
-    worker_downloads   = { container = "downloads", principal_id = azurerm_user_assigned_identity.app["worker"].principal_id, role = "Storage Blob Data Contributor" }
+    web_staging        = { container = "staging", principal_id = data.azurerm_user_assigned_identity.app["web"].principal_id, role = local.blob_data_writer_role }
+    web_renditions     = { container = "renditions", principal_id = data.azurerm_user_assigned_identity.app["web"].principal_id, role = "Storage Blob Data Reader" }
+    web_downloads      = { container = "downloads", principal_id = data.azurerm_user_assigned_identity.app["web"].principal_id, role = "Storage Blob Data Reader" }
+    web_dataprotection = { container = "dataprotection", principal_id = data.azurerm_user_assigned_identity.app["web"].principal_id, role = local.blob_data_writer_role }
+    worker_staging     = { container = "staging", principal_id = data.azurerm_user_assigned_identity.app["worker"].principal_id, role = local.blob_data_writer_role }
+    worker_renditions  = { container = "renditions", principal_id = data.azurerm_user_assigned_identity.app["worker"].principal_id, role = local.blob_data_writer_role }
+    worker_downloads   = { container = "downloads", principal_id = data.azurerm_user_assigned_identity.app["worker"].principal_id, role = local.blob_data_writer_role }
   }
 }
 
@@ -174,8 +168,8 @@ module "postgres" {
   entra_administrators = merge(
     {
       migrator = {
-        object_id      = azurerm_user_assigned_identity.app["migrator"].principal_id
-        principal_name = azurerm_user_assigned_identity.app["migrator"].name
+        object_id      = data.azurerm_user_assigned_identity.app["migrator"].principal_id
+        principal_name = data.azurerm_user_assigned_identity.app["migrator"].name
         principal_type = "ServicePrincipal"
       }
     },
@@ -201,7 +195,7 @@ module "web_app" {
   name                = "ca-${var.project}-web"
   resource_group_name = data.azurerm_resource_group.app.name
   environment_id      = module.container_apps_environment.id
-  identity_id         = azurerm_user_assigned_identity.app["web"].id
+  identity_id         = data.azurerm_user_assigned_identity.app["web"].id
   registry_server     = local.registry_login_server
   image               = local.images["web"]
   cpu                 = 0.5
@@ -212,14 +206,14 @@ module "web_app" {
   tags                = local.tags
 
   env = merge(local.common_env, local.allowed_users_env, {
-    Azure__ManagedIdentityClientId = azurerm_user_assigned_identity.app["web"].client_id
+    Azure__ManagedIdentityClientId = data.azurerm_user_assigned_identity.app["web"].client_id
     Azure__KeyVaultUri             = module.key_vault_web.vault_uri
     Database__ConnectionString     = local.connection_strings["web"]
     DataProtection__KeyVaultKeyId  = "${module.key_vault_web.vault_uri}keys/dataprotection"
   })
 
-  # The image pull and first start need these permissions in place.
-  depends_on = [azurerm_role_assignment.acr_pull, module.key_vault_web, module.storage]
+  # The first start needs these permissions in place (registry pull access comes from infra/bootstrap).
+  depends_on = [module.key_vault_web, module.storage]
 }
 
 module "worker_app" {
@@ -227,7 +221,7 @@ module "worker_app" {
   name                             = "ca-${var.project}-worker"
   resource_group_name              = data.azurerm_resource_group.app.name
   environment_id                   = module.container_apps_environment.id
-  identity_id                      = azurerm_user_assigned_identity.app["worker"].id
+  identity_id                      = data.azurerm_user_assigned_identity.app["worker"].id
   registry_server                  = local.registry_login_server
   image                            = local.images["worker"]
   cpu                              = 1
@@ -239,7 +233,7 @@ module "worker_app" {
   tags                             = local.tags
 
   env = merge(local.common_env, {
-    Azure__ManagedIdentityClientId = azurerm_user_assigned_identity.app["worker"].client_id
+    Azure__ManagedIdentityClientId = data.azurerm_user_assigned_identity.app["worker"].client_id
     Azure__KeyVaultUri             = module.key_vault_worker.vault_uri
     Database__ConnectionString     = local.connection_strings["worker"]
     Archive__ServiceUrl            = var.wasabi_service_url
@@ -249,7 +243,7 @@ module "worker_app" {
     Worker__AiActivitiesPerSecond  = tostring(var.gemini_requests_per_second)
   })
 
-  depends_on = [azurerm_role_assignment.acr_pull, module.key_vault_worker, module.storage]
+  depends_on = [module.key_vault_worker, module.storage]
 }
 
 module "migration_job" {
@@ -258,25 +252,25 @@ module "migration_job" {
   resource_group_name = data.azurerm_resource_group.app.name
   location            = var.location
   environment_id      = module.container_apps_environment.id
-  identity_id         = azurerm_user_assigned_identity.app["migrator"].id
+  identity_id         = data.azurerm_user_assigned_identity.app["migrator"].id
   registry_server     = local.registry_login_server
   image               = local.images["migrator"]
   tags                = local.tags
 
   env = {
     DOTNET_ENVIRONMENT               = "Production"
-    Azure__ManagedIdentityClientId   = azurerm_user_assigned_identity.app["migrator"].client_id
+    Azure__ManagedIdentityClientId   = data.azurerm_user_assigned_identity.app["migrator"].client_id
     Database__ConnectionString       = local.connection_strings["migrator"]
     Database__UseEntraAuthentication = "true"
-    Migrator__AppRoles__0__Name      = azurerm_user_assigned_identity.app["web"].name
-    Migrator__AppRoles__0__ObjectId  = azurerm_user_assigned_identity.app["web"].principal_id
+    Migrator__AppRoles__0__Name      = data.azurerm_user_assigned_identity.app["web"].name
+    Migrator__AppRoles__0__ObjectId  = data.azurerm_user_assigned_identity.app["web"].principal_id
     Migrator__AppRoles__0__Kind      = "Web"
-    Migrator__AppRoles__1__Name      = azurerm_user_assigned_identity.app["worker"].name
-    Migrator__AppRoles__1__ObjectId  = azurerm_user_assigned_identity.app["worker"].principal_id
+    Migrator__AppRoles__1__Name      = data.azurerm_user_assigned_identity.app["worker"].name
+    Migrator__AppRoles__1__ObjectId  = data.azurerm_user_assigned_identity.app["worker"].principal_id
     Migrator__AppRoles__1__Kind      = "Worker"
   }
 
-  depends_on = [azurerm_role_assignment.acr_pull, module.postgres]
+  depends_on = [module.postgres]
 }
 
 # ---------------------------------------------------------------------------------------------------

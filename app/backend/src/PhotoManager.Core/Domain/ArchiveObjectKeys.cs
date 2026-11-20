@@ -77,6 +77,26 @@ public static class ArchiveObjectKeys
         return TryParseV2Name(key, out photoId);
     }
 
+    /// <summary>
+    /// Whether <paramref name="key"/> is an archive object that can hold this photo: a v2 key must carry the photo's
+    /// own id, a legacy key must name a legacy archive file. Workers check this before decrypting anything, so a
+    /// database row pointed at some other object in the bucket is never decrypted for it.
+    /// </summary>
+    /// <param name="key">The object key recorded for the photo.</param>
+    /// <param name="photoId">The photo's id.</param>
+    /// <param name="format">The encryption format recorded for the photo.</param>
+    /// <returns>Whether the key is consistent with the photo.</returns>
+    public static bool BelongsTo(string key, Guid photoId, EncryptionFormat format)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        if (!TryClassify(key, out var keyFormat) || keyFormat != format)
+        {
+            return false;
+        }
+
+        return format != EncryptionFormat.V2 || (TryParseV2Name(key, out var keyPhotoId) && keyPhotoId == photoId);
+    }
+
     private static bool TryParseV2Name(string key, out Guid photoId)
     {
         var fileName = key[(key.LastIndexOf('/') + 1)..^V2Extension.Length];

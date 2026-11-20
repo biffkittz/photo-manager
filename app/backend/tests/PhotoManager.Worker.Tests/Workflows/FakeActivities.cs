@@ -20,6 +20,12 @@ public sealed class FakeActivities
 
     public Exception? DescribeError { get; set; }
 
+    /// <summary>Failure of the staged rendition (the first full decode of an upload).</summary>
+    public Exception? RenderError { get; set; }
+
+    /// <summary>What the staged describe and render activities were asked to verify.</summary>
+    public ConcurrentQueue<StagedUploadInput> StagedInputs { get; } = new();
+
     public Exception? ArchiveError { get; set; }
 
     public ArchiveOriginalInput? ArchivedWith { get; private set; }
@@ -57,14 +63,23 @@ public sealed class FakeActivities
     }
 
     [Activity("DescribeStagedUpload")]
-    public DescribeResult Describe(Guid photoId)
+    public DescribeResult Describe(StagedUploadInput input)
     {
         Calls.Enqueue("describe");
+        StagedInputs.Enqueue(input);
         return DescribeError is null ? new DescribeResult("woman and boy smiling on the beach", ["beach"], "test-model") : throw DescribeError;
     }
 
     [Activity("CreateRenditionsFromStaging")]
-    public void RenderStaged(Guid photoId) => Calls.Enqueue("render");
+    public void RenderStaged(StagedUploadInput input)
+    {
+        Calls.Enqueue("render");
+        StagedInputs.Enqueue(input);
+        if (RenderError is not null)
+        {
+            throw RenderError;
+        }
+    }
 
     [Activity("ArchiveOriginal")]
     public ArchiveResult Archive(ArchiveOriginalInput input)

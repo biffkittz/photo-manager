@@ -61,12 +61,26 @@ export const router = createRouter({
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
   await auth.ensureLoaded()
+  if (!auth.loaded) {
+    // The session could not be checked (offline, server error): that says nothing about being signed in. Public
+    // pages still render; others go to the sign-in page, which explains it and offers to try again. The session
+    // stays unchecked, so the next navigation asks the server again.
+    return to.meta.public
+      ? true
+      : { name: 'login', query: { returnUrl: to.fullPath, error: 'unavailable' } }
+  }
+
   if (!to.meta.public && !auth.isAuthenticated) {
     return { name: 'login', query: { returnUrl: to.fullPath } }
   }
 
   if (to.name === 'login' && auth.isAuthenticated) {
-    return { name: 'gallery' }
+    // Already signed in (for example the session check worked on a second try): go where the user was headed.
+    // Only local paths are followed, never another site.
+    const returnUrl = to.query.returnUrl
+    return typeof returnUrl === 'string' && returnUrl.startsWith('/') && !returnUrl.startsWith('//')
+      ? returnUrl
+      : { name: 'gallery' }
   }
 
   if (to.meta.requiresAdmin && !auth.isAdmin) {

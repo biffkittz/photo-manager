@@ -24,7 +24,8 @@ public sealed class DownloadActivities(
     PhotoCryptoService crypto,
     IBlobStore blobs,
     IOptions<WorkerOptions> options,
-    TimeProvider time)
+    TimeProvider time,
+    ILogger<DownloadActivities> logger)
 {
     // Well inside the activity's 2-minute heartbeat timeout; the SDK throttles what it actually sends.
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(20);
@@ -62,30 +63,58 @@ public sealed class DownloadActivities(
                 throw ActivityErrors.Permanent(ActivityErrors.NotFound, "None of the requested photos are available.");
             }
 
+            var maxBytes = options.Value.MaxDownloadBytes;
+            EnsureEstimatedSizeWithinLimit(photos.Select(p => p.SizeBytes ?? p.ArchiveSizeBytes ?? 0L), maxBytes);
+            await EnsureWithinDailyLimitAsync(download, photos.Count, ct);
+
             var blobName = BlobNames.Download(download.Id);
 
             // What was requested decides the shape: asking for several photos always yields a ZIP.
             var single = download.PhotoIds.Count == 1;
-            var blobStream = await blobs.OpenWriteAsync(BlobArea.Downloads, blobName, ct);
-            var encryptor = await crypto.CreateWebEncryptStreamAsync(blobStream, leaveOpen: false, ct);
+            var budget = new DownloadByteBudget(maxBytes);
             long plaintextLength;
-            await using (encryptor)
+            var completed = false;
+            try
             {
-                if (single)
+                var blobStream = await blobs.OpenWriteAsync(BlobArea.Downloads, blobName, ct);
+                var encryptor = await crypto.CreateWebEncryptStreamAsync(blobStream, leaveOpen: false, ct);
+                await using (encryptor)
                 {
-                    var plaintext = await loader.OpenArchivedAsync(photos[0], ct);
-                    await using (plaintext)
+                    if (single)
                     {
-                        await CopyWithHeartbeatsAsync(plaintext, encryptor, context, ct);
+                        var plaintext = await loader.OpenArchivedAsync(photos[0], ct);
+                        await using (plaintext)
+                        {
+                            await CopyWithHeartbeatsAsync(plaintext, encryptor, budget, () => context.Heartbeat(), ct);
+                        }
                     }
+                    else
+                    {
+                        await WriteZipAsync(photos, encryptor, budget, context, ct);
+                    }
+
+                    await encryptor.CompleteAsync(ct);
+                    plaintextLength = encryptor.PlaintextLength;
+                    completed = true;
                 }
-                else
+            }
+            catch
+            {
+                if (!completed)
                 {
-                    await WriteZipAsync(photos, encryptor, context, ct);
+#pragma warning disable CA1031 // Best-effort cleanup of a partial blob must never mask the root download error.
+                    try
+                    {
+                        await blobs.DeleteIfExistsAsync(BlobArea.Downloads, blobName, CancellationToken.None);
+                    }
+                    catch
+                    {
+                        // The downloads container's 1-day lifecycle rule catches anything left behind.
+                    }
+#pragma warning restore CA1031
                 }
 
-                await encryptor.CompleteAsync(ct);
-                plaintextLength = encryptor.PlaintextLength;
+                throw;
             }
 
             var now = time.GetUtcNow();
@@ -98,11 +127,49 @@ public sealed class DownloadActivities(
             download.ContentType = single ? photos[0].ContentType : "application/zip";
             download.SkippedCount = download.PhotoIds.Count - photos.Count;
             download.ExpiresAt = now + options.Value.DownloadLifetime;
+            download.PreparedAt = now;
             await db.SaveChangesAsync(ct);
+
+            // Downloads are where originals leave the archive, so each one is logged by the worker itself, whatever
+            // the web tier did or did not record in the audit trail.
+            logger.LogInformation(
+                "Prepared download {DownloadId} for GitHub user {RequestedById}: {PhotoCount} photos, {PlaintextBytes} bytes",
+                download.Id,
+                download.RequestedById,
+                photos.Count,
+                plaintextLength);
         }
         catch (Exception ex) when (ActivityErrors.TryTranslate(ex, out var failure))
         {
             throw failure;
+        }
+    }
+
+    /// <summary>
+    /// Enforces <see cref="WorkerOptions.MaxDownloadPhotosPerDay"/> across all users. It counts what the workers
+    /// actually prepared (<see cref="PreparedDownload.PreparedAt"/> is written by workers only; the web tier's
+    /// database role cannot change it), so not even a compromised web tier can raise the rate at which originals
+    /// are decrypted for it. Concurrent downloads may overshoot the limit by at most one download each.
+    /// </summary>
+    private async Task EnsureWithinDailyLimitAsync(PreparedDownload download, int photoCount, CancellationToken cancellationToken)
+    {
+        var limit = options.Value.MaxDownloadPhotosPerDay;
+        var since = time.GetUtcNow().AddDays(-1);
+        var preparedLastDay = await db.Downloads.AsNoTracking()
+            .Where(d => d.PreparedAt != null && d.PreparedAt > since)
+            .SumAsync(d => d.PhotoIds.Count - d.SkippedCount, cancellationToken);
+        if (preparedLastDay + photoCount > limit)
+        {
+            logger.LogWarning(
+                "Download {DownloadId} for GitHub user {RequestedById} refused: {PreparedLastDay} photos were prepared in the last 24 hours and {PhotoCount} more would exceed the limit of {Limit}",
+                download.Id,
+                download.RequestedById,
+                preparedLastDay,
+                photoCount,
+                limit);
+            throw ActivityErrors.Permanent(
+                ActivityErrors.LimitReached,
+                string.Create(CultureInfo.InvariantCulture, $"The daily download limit of {limit:N0} photos (shared by everyone) has been reached. Try again tomorrow, or select fewer photos."));
         }
     }
 
@@ -121,7 +188,12 @@ public sealed class DownloadActivities(
             ActivityExecutionContext.Current.CancellationToken);
     }
 
-    private async Task WriteZipAsync(List<Photo> photos, Stream destination, ActivityExecutionContext context, CancellationToken cancellationToken)
+    private async Task WriteZipAsync(
+        List<Photo> photos,
+        Stream destination,
+        DownloadByteBudget budget,
+        ActivityExecutionContext context,
+        CancellationToken cancellationToken)
     {
         var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var zip = await ZipArchive.CreateAsync(destination, ZipArchiveMode.Create, leaveOpen: true, entryNameEncoding: null, cancellationToken);
@@ -140,7 +212,7 @@ public sealed class DownloadActivities(
                     var plaintext = await loader.OpenArchivedAsync(photo, cancellationToken);
                     await using (plaintext)
                     {
-                        await CopyWithHeartbeatsAsync(plaintext, entryStream, context, cancellationToken);
+                        await CopyWithHeartbeatsAsync(plaintext, entryStream, budget, () => context.Heartbeat(), cancellationToken);
                     }
                 }
 
@@ -148,6 +220,25 @@ public sealed class DownloadActivities(
                 // instead of waiting out the (long) start-to-close timeout of a large ZIP.
                 context.Heartbeat(i + 1);
             }
+        }
+    }
+
+    /// <summary>
+    /// Rejects downloads whose known photo sizes already exceed <paramref name="maxBytes"/> before opening any
+    /// archive streams. Streaming copies still enforce the exact byte budget in case sizes were missing or stale.
+    /// </summary>
+    internal static void EnsureEstimatedSizeWithinLimit(IEnumerable<long> sizes, long maxBytes)
+    {
+        long total = 0;
+        foreach (var raw in sizes)
+        {
+            var size = Math.Max(0L, raw);
+            if (size > maxBytes - total)
+            {
+                throw ActivityErrors.Permanent(ActivityErrors.TooLarge, $"The download exceeds the {FormatByteLimit(maxBytes)} size limit.");
+            }
+
+            total += size;
         }
     }
 
@@ -164,8 +255,13 @@ public sealed class DownloadActivities(
         _ => value,
     };
 
-    // Copies while heartbeating, so one large photo on a slow connection does not exceed the heartbeat timeout.
-    private static async Task CopyWithHeartbeatsAsync(Stream source, Stream destination, ActivityExecutionContext context, CancellationToken cancellationToken)
+    // Copies while heartbeating and enforcing the cumulative download byte budget across all entries.
+    internal static async Task CopyWithHeartbeatsAsync(
+        Stream source,
+        Stream destination,
+        DownloadByteBudget budget,
+        Action heartbeat,
+        CancellationToken cancellationToken)
     {
         var buffer = ArrayPool<byte>.Shared.Rent(81920);
         try
@@ -174,10 +270,11 @@ public sealed class DownloadActivities(
             int read;
             while ((read = await source.ReadAsync(buffer, cancellationToken)) > 0)
             {
+                budget.Consume(read);
                 await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
                 if (Stopwatch.GetElapsedTime(lastHeartbeat) >= HeartbeatInterval)
                 {
-                    context.Heartbeat();
+                    heartbeat();
                     lastHeartbeat = Stopwatch.GetTimestamp();
                 }
             }
@@ -185,6 +282,29 @@ public sealed class DownloadActivities(
         finally
         {
             ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+        }
+    }
+
+    private static string FormatByteLimit(long bytes) => bytes switch
+    {
+        >= 1024L * 1024 * 1024 => string.Create(CultureInfo.InvariantCulture, $"{bytes / (1024.0 * 1024 * 1024):0.#} GB"),
+        >= 1024L * 1024 => string.Create(CultureInfo.InvariantCulture, $"{bytes / (1024.0 * 1024):0.#} MB"),
+        _ => string.Create(CultureInfo.InvariantCulture, $"{bytes} bytes"),
+    };
+
+    /// <summary>Tracks cumulative plaintext bytes across every photo in one prepared download.</summary>
+    internal sealed class DownloadByteBudget(long limit)
+    {
+        private long _used;
+
+        public void Consume(int count)
+        {
+            if (count > limit - _used)
+            {
+                throw ActivityErrors.Permanent(ActivityErrors.TooLarge, $"The download exceeds the {FormatByteLimit(limit)} size limit.");
+            }
+
+            _used += count;
         }
     }
 

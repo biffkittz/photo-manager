@@ -45,6 +45,12 @@ public sealed class PreparedDownload : ITimestamped
     /// <summary>Gets or sets when the content becomes unavailable (blob lifecycle deletes it).</summary>
     public DateTimeOffset ExpiresAt { get; set; }
 
+    /// <summary>
+    /// Gets or sets when a worker finished preparing the download. Written by workers only (the web tier's database
+    /// role cannot update it); the daily download limit counts these.
+    /// </summary>
+    public DateTimeOffset? PreparedAt { get; set; }
+
     /// <inheritdoc />
     public DateTimeOffset CreatedAt { get; set; }
 

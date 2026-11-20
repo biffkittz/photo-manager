@@ -13,20 +13,42 @@ public sealed class AntiforgeryValidationFilter(IAntiforgery antiforgery) : IEnd
     /// <summary>Header carrying the request token.</summary>
     public const string HeaderName = "X-CSRF-TOKEN";
 
+    /// <summary>
+    /// Problem type of the rejection, so the SPA can tell a stale token (fetch a fresh one and retry once) from
+    /// other 403 responses.
+    /// </summary>
+    public const string ProblemType = "urn:photo-manager:problem:csrf";
+
     /// <inheritdoc />
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(next);
-        var method = context.HttpContext.Request.Method;
+        var http = context.HttpContext;
+        var method = http.Request.Method;
         if (HttpMethods.IsPost(method) || HttpMethods.IsPut(method) || HttpMethods.IsPatch(method) || HttpMethods.IsDelete(method))
         {
-            if (!await antiforgery.IsRequestValidAsync(context.HttpContext))
+            // The header is required before IAntiforgery looks at the request at all, so a request without it is
+            // refused without its body ever being read (see AuthenticationSetup: tokens are never taken from forms).
+            if (string.IsNullOrEmpty(http.Request.Headers[HeaderName]) || !await IsValidAsync(http))
             {
-                return TypedResults.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Missing or invalid CSRF token.");
+                return TypedResults.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Missing or invalid CSRF token.", type: ProblemType);
             }
         }
 
         return await next(context);
+    }
+
+    private async Task<bool> IsValidAsync(HttpContext http)
+    {
+        try
+        {
+            return await antiforgery.IsRequestValidAsync(http);
+        }
+        catch (AntiforgeryValidationException)
+        {
+            // A token or cookie that cannot be read at all is just an invalid token, not a server error.
+            return false;
+        }
     }
 }

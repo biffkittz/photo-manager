@@ -7,7 +7,10 @@ export type RenditionStatus = 'ready' | 'pending' | 'unavailable'
 /**
  * Tracks whether a rendition can be shown. Ready renditions are loaded straight into <img> (cookie-authenticated,
  * cached immutably). When a photo has none yet, the API answers 202 and asks a worker to create one; this
- * composable polls until it is ready, then hands the URL to <img>. Polling stops on unmount or URL change.
+ * composable polls until it is ready, then hands the URL to <img>. If an <img> fails to load (for example
+ * because the session expired with 401 or a missing/retired-key rendition triggered 202 regeneration),
+ * `handleImageError` probes the URL so the UI can sign out or poll instead of showing a permanent error.
+ * Polling stops on unmount or URL change.
  *
  * `state` is the photo's rendition state, or undefined while the photo itself is still loading (nothing is fetched
  * until it is known). Failed and unsupported renditions are reported as unavailable without a request.
@@ -20,6 +23,7 @@ export function useRendition(
   const status = ref<RenditionStatus>(initialStatus(state.value))
   let controller: AbortController | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
+  let imageErrorProbed = false
 
   function stop(): void {
     controller?.abort()
@@ -31,15 +35,25 @@ export function useRendition(
   }
 
   async function poll(attempt: number): Promise<void> {
-    controller = new AbortController()
+    const myController = new AbortController()
+    controller = myController
+    const targetUrl = url.value
     try {
-      const response = await fetch(url.value, {
+      const response = await fetch(targetUrl, {
         credentials: 'same-origin',
-        signal: controller.signal,
+        signal: myController.signal,
       })
+      if (myController.signal.aborted) {
+        return
+      }
+
       if (response.status === 200) {
         // Read the (small) body so the browser can cache it; the <img> then loads it without a second download.
         await response.blob()
+        if (myController.signal.aborted) {
+          return
+        }
+
         status.value = 'ready'
         return
       }
@@ -55,18 +69,47 @@ export function useRendition(
         return
       }
 
-      timer = setTimeout(() => void poll(attempt + 1), options.intervalMs)
+      timer = setTimeout(() => {
+        timer = null
+        if (!myController.signal.aborted) {
+          void poll(attempt + 1)
+        }
+      }, options.intervalMs)
     } catch (error) {
-      if (!(error instanceof DOMException && error.name === 'AbortError')) {
-        status.value = 'unavailable'
+      if (
+        myController.signal.aborted ||
+        (error instanceof DOMException && error.name === 'AbortError')
+      ) {
+        return
       }
+
+      status.value = 'unavailable'
     }
+  }
+
+  /**
+   * Probes a failed <img> load once to distinguish an expired session (401) or server-triggered
+   * regeneration (202) from a permanent failure. A second <img> error for the same URL/state gives up
+   * immediately so corrupt 200 image bytes cannot trigger a retry loop.
+   */
+  function handleImageError(): void {
+    if (imageErrorProbed) {
+      stop()
+      status.value = 'unavailable'
+      return
+    }
+
+    imageErrorProbed = true
+    stop()
+    status.value = 'pending'
+    void poll(1)
   }
 
   watch(
     [url, state],
     ([, current]) => {
       stop()
+      imageErrorProbed = false
       status.value = initialStatus(current)
       if (current === 'NotStarted' || current === 'Pending') {
         void poll(1)
@@ -76,7 +119,7 @@ export function useRendition(
   )
 
   onBeforeUnmount(stop)
-  return { status, markUnavailable: () => (status.value = 'unavailable') }
+  return { status, handleImageError }
 }
 
 function initialStatus(state: ProcessingState | undefined): RenditionStatus {

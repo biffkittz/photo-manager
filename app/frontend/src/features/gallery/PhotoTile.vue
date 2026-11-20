@@ -9,7 +9,7 @@ const props = defineProps<{ photo: PhotoSummary; selected: boolean }>()
 const emit = defineEmits<{ open: [id: string]; toggle: [id: string] }>()
 
 const src = computed(() => urls.thumbnail(props.photo.id, props.photo.renditionVersion))
-const { status, markUnavailable } = useRendition(
+const { status, handleImageError } = useRendition(
   src,
   toRef(() => props.photo.renditionState),
 )
@@ -32,7 +32,7 @@ const alt = computed(() => props.photo.description || `Photo ${props.photo.fileN
         loading="lazy"
         decoding="async"
         class="size-full object-cover"
-        @error="markUnavailable"
+        @error="handleImageError"
       />
       <span
         v-else

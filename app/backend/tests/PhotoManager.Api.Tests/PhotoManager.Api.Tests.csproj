@@ -19,5 +19,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\PhotoManager.Api\PhotoManager.Api.csproj" />
+    <!-- The real grants (RoleProvisioner), so the API runs under the same least-privilege role as in production. -->
+    <ProjectReference Include="..\..\src\PhotoManager.Migrator\PhotoManager.Migrator.csproj" Aliases="migrator" />
   </ItemGroup>
 </Project>

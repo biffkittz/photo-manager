@@ -1,12 +1,20 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Security.Claims;
 using System.Text.Json;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Npgsql;
 using NSubstitute;
 using PhotoManager.Api.Auth;
 using PhotoManager.Api.Contracts;
 using PhotoManager.Api.Tests.Support;
+using PhotoManager.Api.Uploads;
 using PhotoManager.Core.Crypto;
 using PhotoManager.Core.Domain;
 using PhotoManager.Core.Workflows;
@@ -81,6 +89,29 @@ public sealed class ApiTests(ApiFactory factory)
         client.DefaultRequestHeaders.Add("X-CSRF-TOKEN", token);
         var withToken = await client.PostAsync("/api/auth/logout", null, Ct);
         Assert.Equal(HttpStatusCode.NoContent, withToken.StatusCode);
+        Assert.Equal("\"cache\"", withToken.Headers.GetValues("Clear-Site-Data").Single());
+    }
+
+    [Fact]
+    public async Task Rejected_sessions_clear_browser_cache()
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var options = scope.ServiceProvider.GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
+            .Get(CookieAuthenticationDefaults.AuthenticationScheme);
+        var httpContext = new DefaultHttpContext { RequestServices = scope.ServiceProvider };
+        var scheme = new AuthenticationScheme(CookieAuthenticationDefaults.AuthenticationScheme, null, typeof(CookieAuthenticationHandler));
+        var expiredPrincipal = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.NameIdentifier, ApiFactory.MemberId.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+            new Claim(ClaimTypes.Role, PhotoRoles.Member),
+            new Claim(PhotoClaims.SignedInAt, "0"),
+        ], CookieAuthenticationDefaults.AuthenticationScheme));
+        var context = new CookieValidatePrincipalContext(httpContext, scheme, options, new AuthenticationTicket(expiredPrincipal, CookieAuthenticationDefaults.AuthenticationScheme));
+
+        await options.Events.OnValidatePrincipal(context);
+
+        Assert.Null(context.Principal);
+        Assert.Equal("\"cache\"", httpContext.Response.Headers["Clear-Site-Data"].ToString());
     }
 
     [Fact]
@@ -110,6 +141,31 @@ public sealed class ApiTests(ApiFactory factory)
             WorkflowTypes.PhotoIngest,
             Arg.Any<IReadOnlyCollection<object?>>(),
             Arg.Is<WorkflowOptions>(o => o.Id == WorkflowIds.PhotoIngest(body.PhotoId) && o.TaskQueue == TaskQueues.Ingest));
+    }
+
+    [Fact]
+    public async Task Upload_clamps_long_filenames_and_cleans_up_staging_blob_on_db_failure()
+    {
+        var client = await ApiFactory.WithCsrfAsync(factory.ClientFor(ApiFactory.MemberId));
+
+        byte[] jpeg = [0xFF, 0xD8, 0xFF, 0xE0, .. System.Security.Cryptography.RandomNumberGenerator.GetBytes(2000)];
+        var accepted = await client.PostAsync("/api/uploads", FileContent(new string('a', 220), jpeg), Ct);
+        Assert.Equal(HttpStatusCode.Accepted, accepted.StatusCode);
+        var body = await accepted.Content.ReadFromJsonAsync<UploadAccepted>(Json, Ct);
+        var photo = await factory.WithDbAsync(db => db.Photos.AsNoTracking().SingleAsync(p => p.Id == body!.PhotoId, Ct));
+        Assert.Equal(FileNames.MaxLength, photo.OriginalFileName.Length);
+        Assert.EndsWith(".jpg", photo.OriginalFileName, StringComparison.Ordinal);
+
+        // If SaveChangesAsync fails after the staging blob is written, the blob is deleted instead of orphaned.
+        var stagingCountBefore = factory.Blobs.Blobs.Keys.Count(k => k.Area == BlobArea.Staging);
+        await using var scope = factory.Services.CreateAsyncScope();
+        var uploader = scope.ServiceProvider.GetRequiredService<UploadService>();
+        byte[] failingJpeg = [0xFF, 0xD8, 0xFF, 0xE0, .. System.Security.Cryptography.RandomNumberGenerator.GetBytes(2000)];
+        using var stream = new MemoryStream(failingJpeg);
+        await Assert.ThrowsAsync<DbUpdateException>(() =>
+            uploader.StageAsync(stream, "valid.jpg", null, new string('u', 150), ApiFactory.MemberId, Ct));
+        var stagingCountAfter = factory.Blobs.Blobs.Keys.Count(k => k.Area == BlobArea.Staging);
+        Assert.Equal(stagingCountBefore, stagingCountAfter);
     }
 
     [Fact]
@@ -151,6 +207,21 @@ public sealed class ApiTests(ApiFactory factory)
         Assert.Equal(webp, await served.Content.ReadAsByteArrayAsync(Ct));
         Assert.Contains("immutable", served.Headers.CacheControl!.ToString(), StringComparison.Ordinal);
 
+        var unversioned = await client.GetAsync($"/api/photos/{ready}/thumbnail", Ct);
+        Assert.Equal(HttpStatusCode.OK, unversioned.StatusCode);
+        Assert.Equal("no-cache, private", unversioned.Headers.CacheControl!.ToString());
+
+        var mismatched = await client.GetAsync($"/api/photos/{ready}/thumbnail?v=99", Ct);
+        Assert.Equal(HttpStatusCode.OK, mismatched.StatusCode);
+        Assert.Equal("no-cache, private", mismatched.Headers.CacheControl!.ToString());
+
+        var goneBlob = await SeedReadyPhotoAsync("gone", "gone.jpg", ProcessingState.Ready);
+        var regenerate = await client.GetAsync($"/api/photos/{goneBlob}/thumbnail?v=1", Ct);
+        Assert.Equal(HttpStatusCode.Accepted, regenerate.StatusCode);
+        var resetState = await factory.WithDbAsync(db => db.Photos.AsNoTracking().Where(p => p.Id == goneBlob).Select(p => p.RenditionState).SingleAsync(Ct));
+        Assert.Equal(ProcessingState.NotStarted, resetState);
+        await factory.Temporal.Received().StartWorkflowAsync(WorkflowTypes.EnsureRenditions, Arg.Any<IReadOnlyCollection<object?>>(), Arg.Is<WorkflowOptions>(o => o.Id == WorkflowIds.EnsureRenditions(goneBlob)));
+
         var missing = await SeedReadyPhotoAsync("legacy", "legacy.jpg", ProcessingState.NotStarted);
         var pending = await client.GetAsync($"/api/photos/{missing}/thumbnail", Ct);
         Assert.Equal(HttpStatusCode.Accepted, pending.StatusCode);
@@ -184,6 +255,73 @@ public sealed class ApiTests(ApiFactory factory)
 
         Assert.Equal(HttpStatusCode.NotFound, (await factory.ClientFor(ApiFactory.MemberId).GetAsync($"/api/downloads/{id}", Ct)).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await factory.ClientFor(ApiFactory.AdminId).GetAsync($"/api/downloads/{id}", Ct)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Downloads_enforce_raw_count_size_and_pending_concurrency_limits()
+    {
+        var kestrel = factory.Services.GetRequiredService<IOptions<KestrelServerOptions>>().Value;
+        Assert.Equal(64 * 1024, kestrel.Limits.MaxRequestBodySize);
+
+        var smallId = await SeedReadyPhotoAsync("small", "small.jpg", sizeBytes: 1024);
+        var hugeA = await SeedReadyPhotoAsync("huge-a", "huge-a.jpg", sizeBytes: 2_500_000_000L);
+        var hugeB = await SeedReadyPhotoAsync("huge-b", "huge-b.jpg", sizeBytes: 2_500_000_000L);
+
+        var member = await ApiFactory.WithCsrfAsync(factory.ClientFor(ApiFactory.MemberId));
+
+        // 501 duplicate GUIDs must be rejected before deduplication collapses them to 1.
+        var tooManyDuplicates = await member.PostAsJsonAsync(
+            "/api/downloads",
+            new CreateDownloadRequest([.. Enumerable.Repeat(smallId, 501)]),
+            Json,
+            Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, tooManyDuplicates.StatusCode);
+
+        // Aggregate size above 4 GiB is rejected upfront before queuing a worker job.
+        var tooLarge = await member.PostAsJsonAsync(
+            "/api/downloads",
+            new CreateDownloadRequest([hugeA, hugeB]),
+            Json,
+            Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, tooLarge.StatusCode);
+
+        // Expired pending downloads do not count against the active concurrency cap.
+        await factory.WithDbAsync(async db =>
+        {
+            db.Downloads.Add(new PreparedDownload
+            {
+                Id = Guid.CreateVersion7(),
+                Status = DownloadStatus.Pending,
+                PhotoIds = [smallId],
+                RequestedBy = "user1002",
+                RequestedById = ApiFactory.MemberId,
+                FileName = "expired.jpg",
+                ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-5),
+            });
+            return await db.SaveChangesAsync(Ct);
+        });
+
+        // At most 3 active pending downloads per user; a 4th is rejected with 429 while another user is unaffected.
+        var createdIds = new List<Guid>();
+        for (var i = 0; i < 3; i++)
+        {
+            var accepted = await member.PostAsJsonAsync("/api/downloads", new CreateDownloadRequest([smallId]), Json, Ct);
+            Assert.Equal(HttpStatusCode.Accepted, accepted.StatusCode);
+            var body = await accepted.Content.ReadFromJsonAsync<DownloadResponse>(Json, Ct);
+            createdIds.Add(body!.Id);
+        }
+
+        var fourth = await member.PostAsJsonAsync("/api/downloads", new CreateDownloadRequest([smallId]), Json, Ct);
+        Assert.Equal(HttpStatusCode.TooManyRequests, fourth.StatusCode);
+
+        var admin = await ApiFactory.WithCsrfAsync(factory.ClientFor(ApiFactory.AdminId));
+        var adminAccepted = await admin.PostAsJsonAsync("/api/downloads", new CreateDownloadRequest([smallId]), Json, Ct);
+        Assert.Equal(HttpStatusCode.Accepted, adminAccepted.StatusCode);
+
+        // Clean up pending rows so later tests for MemberId are unaffected.
+        var adminBody = await adminAccepted.Content.ReadFromJsonAsync<DownloadResponse>(Json, Ct);
+        createdIds.Add(adminBody!.Id);
+        await factory.WithDbAsync(db => db.Downloads.Where(d => createdIds.Contains(d.Id)).ExecuteUpdateAsync(s => s.SetProperty(d => d.Status, DownloadStatus.Ready), Ct));
     }
 
     [Fact]
@@ -292,6 +430,126 @@ public sealed class ApiTests(ApiFactory factory)
         Assert.Contains("ArchivePassword", error.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Csrf_token_is_only_taken_from_the_header_and_bodies_are_not_read_without_it()
+    {
+        var client = factory.ClientFor(ApiFactory.MemberId);
+        var session = await client.GetFromJsonAsync<SessionResponse>("/api/auth/session", Ct);
+
+        // A valid token in a form field is what antiforgery would accept by default, by reading the whole form (for
+        // an upload: buffering the photo to a temporary file). It is ignored: no header, no request.
+        using var form = FileContent("a.jpg", new byte[4096]);
+        form.Add(new StringContent(session!.CsrfToken!), "__RequestVerificationToken");
+        using var response = await client.PostAsync("/api/uploads", form, Ct);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Ct));
+        Assert.Equal(AntiforgeryValidationFilter.ProblemType, problem.RootElement.GetProperty("type").GetString());
+
+        // A malformed multipart body without the header is refused the same way, not a server error.
+        using var malformed = new StringContent("--x\r\nnot a part");
+        malformed.Headers.ContentType = MediaTypeHeaderValue.Parse("multipart/form-data; boundary=x");
+        using var refused = await client.PostAsync("/api/uploads", malformed, Ct);
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+    }
+
+    [Fact]
+    public async Task OAuth_callback_is_rate_limited_although_authentication_answers_it()
+    {
+        var client = factory.ClientFor(null);
+        var statuses = new List<HttpStatusCode>();
+        for (var i = 0; i < 31; i++)
+        {
+            using var response = await client.GetAsync($"{AuthenticationSetup.CallbackPath}?code=x&state=x", Ct);
+            statuses.Add(response.StatusCode);
+        }
+
+        Assert.All(statuses.Take(30), status => Assert.NotEqual(HttpStatusCode.TooManyRequests, status));
+        Assert.Equal(HttpStatusCode.TooManyRequests, statuses[^1]);
+    }
+
+    [Fact]
+    public async Task Job_start_succeeds_when_the_worker_records_the_run_first()
+    {
+        // The worker may mark the job running (recording its run id) before the API writes the run id itself. That
+        // used to fail the request with a concurrency error after the job had already started, skipping the audit.
+        factory.Temporal.StartWorkflowAsync(
+                WorkflowTypes.Backfill,
+                Arg.Is<IReadOnlyCollection<object?>>(a => a.OfType<BackfillInput>().Any(i => i.Kind == JobKind.BackfillDescriptions)),
+                Arg.Any<WorkflowOptions>())
+            .Returns(async call =>
+            {
+                var input = call.ArgAt<IReadOnlyCollection<object?>>(1).OfType<BackfillInput>().Single();
+                await factory.WithDbAsync(db => db.Jobs.Where(j => j.Id == input.JobId).ExecuteUpdateAsync(
+                    s => s.SetProperty(j => j.Status, JobStatus.Running).SetProperty(j => j.RunId, "run-from-worker"),
+                    Ct));
+                return new WorkflowHandle(factory.Temporal, WorkflowIds.Backfill(JobKind.BackfillDescriptions), FirstExecutionRunId: "run-from-worker");
+            });
+        var admin = await ApiFactory.WithCsrfAsync(factory.ClientFor(ApiFactory.AdminId));
+
+        using var response = await admin.PostAsJsonAsync("/api/jobs", new StartJobRequest(JobKind.BackfillDescriptions), Json, Ct);
+
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        var job = await factory.WithDbAsync(db => db.Jobs.AsNoTracking().Where(j => j.Kind == JobKind.BackfillDescriptions).OrderByDescending(j => j.CreatedAt).FirstAsync(Ct));
+        Assert.Equal(JobStatus.Running, job.Status);
+        Assert.Equal("run-from-worker", job.RunId);
+        Assert.True(await factory.WithDbAsync(db => db.AuditEvents.AnyAsync(e => e.Action == "job.start" && e.Target == job.Id.ToString(), Ct)));
+    }
+
+    [Fact]
+    public async Task Cancelling_a_job_without_a_recorded_run_never_targets_its_workflow_id()
+    {
+        // Job workflow ids are reused, so a cancel without a run id would stop whichever job runs under the id now.
+        var jobId = Guid.CreateVersion7();
+        var workflowId = $"test-unstarted-{jobId:N}";
+        await factory.WithDbAsync(async db =>
+        {
+            db.Jobs.Add(new MaintenanceJob { Id = jobId, Kind = JobKind.BackfillRenditions, Status = JobStatus.Queued, WorkflowId = workflowId, RequestedBy = "user1001" });
+            return await db.SaveChangesAsync(Ct);
+        });
+        var admin = await ApiFactory.WithCsrfAsync(factory.ClientFor(ApiFactory.AdminId));
+
+        using var response = await admin.PostAsync($"/api/jobs/{jobId}/cancel", null, Ct);
+
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        factory.Temporal.DidNotReceive().GetWorkflowHandle(workflowId, Arg.Any<string?>(), Arg.Any<string?>());
+        var job = await factory.WithDbAsync(db => db.Jobs.AsNoTracking().SingleAsync(j => j.Id == jobId, Ct));
+        Assert.Equal(JobStatus.Cancelled, job.Status);
+        Assert.NotNull(job.CompletedAt);
+    }
+
+    [Fact]
+    public async Task Web_database_role_cannot_point_a_photo_at_another_archive_object()
+    {
+        var id = await SeedReadyPhotoAsync(null, "web-role.jpg");
+        await using var connection = new NpgsqlConnection(factory.WebConnectionString);
+        await connection.OpenAsync(Ct);
+
+        // What the web tier legitimately changes...
+        await using (var edit = new NpgsqlCommand("UPDATE photos SET description = 'edited', updated_at = now() WHERE id = @id", connection))
+        {
+            edit.Parameters.AddWithValue("id", id);
+            Assert.Equal(1, await edit.ExecuteNonQueryAsync(Ct));
+        }
+
+        // ...but never where a photo is archived, how it is encrypted, its content hash or who uploaded it, which
+        // would let a compromised web tier have a worker decrypt any object in the bucket for it.
+        string[] tampering =
+        [
+            "UPDATE photos SET archive_key = 'v2/2026/11/00000000000000000000000000000000.pmv2' WHERE id = @id",
+            "UPDATE photos SET encryption_format = 'V2' WHERE id = @id",
+            "UPDATE photos SET sha256 = repeat('0', 64) WHERE id = @id",
+            "UPDATE photos SET uploaded_by_id = 1 WHERE id = @id",
+            "DELETE FROM photos WHERE id = @id",
+        ];
+        foreach (var sql in tampering)
+        {
+            await using var tamper = new NpgsqlCommand(sql, connection);
+            tamper.Parameters.AddWithValue("id", id);
+            var error = await Assert.ThrowsAsync<PostgresException>(() => tamper.ExecuteNonQueryAsync(Ct));
+            Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, error.SqlState);
+        }
+    }
+
     private static MultipartFormDataContent FileContent(string fileName, byte[] bytes)
     {
         var file = new ByteArrayContent(bytes);
@@ -307,7 +565,7 @@ public sealed class ApiTests(ApiFactory factory)
         }
     }
 
-    private Task<Guid> SeedReadyPhotoAsync(string? description, string fileName, ProcessingState renditions = ProcessingState.Ready) =>
+    private Task<Guid> SeedReadyPhotoAsync(string? description, string fileName, ProcessingState renditions = ProcessingState.Ready, long? sizeBytes = null) =>
         factory.WithDbAsync(async db =>
         {
             var photo = new Photo
@@ -319,6 +577,7 @@ public sealed class ApiTests(ApiFactory factory)
                 ArchiveKey = $"2024-01-01/{Guid.NewGuid():N}.jpg.encrypted",
                 OriginalFileName = fileName,
                 ContentType = "image/jpeg",
+                SizeBytes = sizeBytes,
                 Description = description,
                 UploadedAt = DateTimeOffset.UtcNow,
                 RenditionState = renditions,

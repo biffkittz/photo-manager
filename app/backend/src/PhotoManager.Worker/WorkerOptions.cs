@@ -44,4 +44,14 @@ public sealed class WorkerOptions
 
     /// <summary>Gets or sets the most photos a single ZIP download may contain.</summary>
     public int MaxPhotosPerDownload { get; set; } = 500;
+
+    /// <summary>Gets or sets the largest total original size a single download (single file or ZIP) may contain (default 4 GiB).</summary>
+    public long MaxDownloadBytes { get; set; } = 4L * 1024 * 1024 * 1024;
+
+    /// <summary>
+    /// Gets or sets the most photos the workers prepare for download in any 24 hours, across all users. Enforced
+    /// here rather than in the API: it bounds how fast even a compromised web tier could have the archive
+    /// decrypted for it (docs/adr/0001-split-keys.md).
+    /// </summary>
+    public int MaxDownloadPhotosPerDay { get; set; } = 2000;
 }

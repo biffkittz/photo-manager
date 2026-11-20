@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using PhotoManager.Api.Audit;
@@ -35,10 +36,10 @@ public static class PhotoEndpoints
         photos.MapGet("/", ListAsync);
         photos.MapGet("/{id:guid}", GetAsync);
         photos.MapPatch("/{id:guid}", UpdateAsync);
-        photos.MapGet("/{id:guid}/thumbnail", (Guid id, HttpContext http, PhotoDbContext db, IBlobStore blobs, PhotoCryptoService crypto, PhotoWorkflowClient workflows, CancellationToken ct) =>
-            ServeRenditionAsync(id, BlobNames.Thumbnail(id), http, db, blobs, crypto, workflows, ct));
-        photos.MapGet("/{id:guid}/preview", (Guid id, HttpContext http, PhotoDbContext db, IBlobStore blobs, PhotoCryptoService crypto, PhotoWorkflowClient workflows, CancellationToken ct) =>
-            ServeRenditionAsync(id, BlobNames.Preview(id), http, db, blobs, crypto, workflows, ct));
+        photos.MapGet("/{id:guid}/thumbnail", (Guid id, HttpContext http, PhotoDbContext db, IBlobStore blobs, PhotoCryptoService crypto, PhotoWorkflowClient workflows, TimeProvider time, CancellationToken ct) =>
+            ServeRenditionAsync(id, BlobNames.Thumbnail(id), http, db, blobs, crypto, workflows, time, ct));
+        photos.MapGet("/{id:guid}/preview", (Guid id, HttpContext http, PhotoDbContext db, IBlobStore blobs, PhotoCryptoService crypto, PhotoWorkflowClient workflows, TimeProvider time, CancellationToken ct) =>
+            ServeRenditionAsync(id, BlobNames.Preview(id), http, db, blobs, crypto, workflows, time, ct));
         photos.MapPost("/{id:guid}/describe", DescribeAsync).RequireRateLimiting(RateLimitPolicies.Expensive);
         return api;
     }
@@ -160,11 +161,12 @@ public static class PhotoEndpoints
         IBlobStore blobs,
         PhotoCryptoService crypto,
         PhotoWorkflowClient workflows,
+        TimeProvider time,
         CancellationToken ct)
     {
         var photo = await db.Photos.AsNoTracking()
             .Where(p => p.Id == id && p.Status == PhotoStatus.Ready)
-            .Select(p => new { p.RenditionState, p.ArchiveKey })
+            .Select(p => new { p.RenditionState, p.RenditionVersion, p.ArchiveKey })
             .SingleOrDefaultAsync(ct);
         if (photo is null)
         {
@@ -181,34 +183,42 @@ public static class PhotoEndpoints
                 // still possible, and is regenerated instead of failing after headers were sent.
                 var content = await ReadRenditionAsync(blobName, blobs, crypto, ct);
 
-                // Rendition URLs carry ?v=<RenditionVersion>, so the content behind a URL never changes.
-                http.Response.Headers.CacheControl = "private, max-age=31536000, immutable";
+                // Only cache immutably when ?v= matches the current RenditionVersion, so unversioned or stale
+                // URLs (for example a poll started at ?v=0 before generation finished) are never pinned for a year.
+                var versionMatched = photo.RenditionVersion > 0
+                    && http.Request.Query.TryGetValue("v", out var versionValues)
+                    && versionValues.Count == 1
+                    && string.Equals(versionValues[0], photo.RenditionVersion.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
+                http.Response.Headers.CacheControl = versionMatched
+                    ? "private, max-age=31536000, immutable"
+                    : "private, no-cache";
                 return TypedResults.File(content, "image/webp");
             }
             catch (StorageObjectNotFoundException)
             {
-                // The record says ready but the blob is gone (e.g. container cleaned up): regenerate.
+                // The record says ready but the blob is gone (e.g. container cleaned up): reset to NotStarted so
+                // a subsequent worker failure can record Failed instead of leaving the photo in an infinite loop.
+                await ResetRenditionStateAsync(db, id, time, ct);
                 renditionState = ProcessingState.NotStarted;
             }
             catch (Exception ex) when (ex is PhotoDecryptionException or PhotoKeyUnavailableException or CryptographicException or InvalidDataException)
             {
                 CreateLogger(http).LogWarning(ex, "Rendition {BlobName} could not be decrypted; regenerating it", blobName);
-                await db.Photos.Where(p => p.Id == id && p.RenditionState == ProcessingState.Ready)
-                    .ExecuteUpdateAsync(s => s.SetProperty(p => p.RenditionState, ProcessingState.NotStarted), ct);
+                await ResetRenditionStateAsync(db, id, time, ct);
                 renditionState = ProcessingState.NotStarted;
             }
         }
 
-        if (renditionState is ProcessingState.Failed or ProcessingState.Unsupported)
+        if (renditionState is ProcessingState.Failed or ProcessingState.Unsupported || photo.ArchiveKey is null)
         {
             return TypedResults.NotFound();
         }
 
-        if (photo.ArchiveKey is not null && renditionState != ProcessingState.Pending)
+        if (renditionState != ProcessingState.Pending)
         {
             try
             {
-                await workflows.StartEnsureRenditionsAsync(id, ct);
+                await workflows.StartEnsureRenditionsAsync(id);
             }
             catch (Exception ex) when (TemporalUnavailable.Matches(ex))
             {
@@ -240,6 +250,16 @@ public static class PhotoEndpoints
         return buffer.ToArray();
     }
 
+    private static Task<int> ResetRenditionStateAsync(PhotoDbContext db, Guid id, TimeProvider time, CancellationToken ct)
+    {
+        var now = time.GetUtcNow();
+        return db.Photos.Where(p => p.Id == id && p.RenditionState == ProcessingState.Ready)
+            .ExecuteUpdateAsync(
+                s => s.SetProperty(p => p.RenditionState, ProcessingState.NotStarted)
+                      .SetProperty(p => p.UpdatedAt, now),
+                ct);
+    }
+
     private static ILogger CreateLogger(HttpContext http) =>
         http.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(PhotoEndpoints));
 
@@ -257,7 +277,7 @@ public static class PhotoEndpoints
         await db.Photos.Where(p => p.Id == id).ExecuteUpdateAsync(s => s.SetProperty(p => p.DescriptionState, ProcessingState.Pending), ct);
         try
         {
-            await workflows.StartDescribeAsync(id, ct);
+            await workflows.StartDescribeAsync(id);
         }
         catch (Exception ex) when (TemporalUnavailable.Matches(ex))
         {

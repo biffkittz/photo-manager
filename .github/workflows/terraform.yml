@@ -1,13 +1,20 @@
-# Infrastructure: plan on pull requests (read-only identity), apply on main behind the "production"
-# environment (configure required reviewers on it). Azure access is keyless (OIDC federation).
-# Third-party credentials follow the same split: pull-request plans get read-only Cloudflare/Temporal Cloud
-# credentials (repository secrets); the write-capable ones are secrets of the "production" environment and
-# are released only to the approved apply job.
+# Infrastructure. Azure access is keyless (OIDC federation).
+#   Pull requests: plan with the read-only identity.
+#   main: "plan-main" plans with the same read-only identity *before* anyone approves anything and puts the full
+#   plan in the run summary. The "apply" job waits for approval in the "production" environment (required
+#   reviewers), plans again with the deploy identity and applies only if that plan makes exactly the changes
+#   that were shown (compared by fingerprint, .github/scripts/terraform-plan-fingerprint.sh). A plan file is never
+#   passed between jobs: artifacts are readable by anyone with access to the repository and plans can contain
+#   secret values.
+# Third-party credentials follow the same split: plans get read-only Cloudflare/Temporal Cloud credentials
+# (repository secrets); the write-capable ones are secrets of the "production" environment and are released only
+# to the approved apply job. Production jobs run for main only; the environment's deployment branch rule (main
+# only) is what enforces that, the checks here guard against mistakes.
 name: Terraform
 
 on:
   pull_request:
-    paths: ["infra/**", ".github/workflows/terraform.yml"]
+    paths: ["infra/**", ".github/workflows/terraform.yml", ".github/scripts/terraform-plan-fingerprint.sh"]
   push:
     branches: [main]
     paths: ["infra/**"]
@@ -62,14 +69,56 @@ jobs:
       - run: terraform init -input=false
       # -lock=false: the plan identity can only read the state, so code under review can never modify it.
       # (Runs are serialized by the workflow's concurrency group.)
-      - run: terraform plan -input=false -lock=false -no-color | tee plan.txt
+      - run: terraform plan -input=false -lock=false -no-color -out=tfplan
       - name: Plan summary
-        if: always()
         run: |
-          { echo '### Terraform plan'; echo '```'; grep -E '^(Plan:|No changes|Error)' plan.txt || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo '### Terraform plan (pull request)'
+            echo '```'
+            terraform show -no-color tfplan
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  plan-main:
+    # What main would change, planned and shown before anyone is asked to approve the apply.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      fingerprint: ${{ steps.fingerprint.outputs.value }}
+    env:
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID_PLAN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN_READONLY }}
+      TEMPORAL_CLOUD_API_KEY: ${{ secrets.TEMPORAL_CLOUD_API_KEY_READONLY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.17.1"
+          terraform_wrapper: false
+      - name: Variables
+        env:
+          TFVARS: ${{ vars.TF_VARS_PROD }}
+        run: printf '%s\n' "$TFVARS" > terraform.tfvars
+      - run: terraform init -input=false
+      - run: terraform plan -input=false -lock=false -no-color -out=tfplan
+      - name: Plan to review before approving the apply
+        run: |
+          {
+            echo '### Terraform plan for main'
+            echo 'Review this before approving the **apply** job. The apply only runs if its own plan makes exactly these changes.'
+            echo '```'
+            terraform show -no-color tfplan
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - id: fingerprint
+        run: echo "value=$("$GITHUB_WORKSPACE/.github/scripts/terraform-plan-fingerprint.sh" tfplan)" >> "$GITHUB_OUTPUT"
 
   apply:
-    if: github.event_name != 'pull_request'
+    needs: plan-main
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: production
@@ -90,5 +139,14 @@ jobs:
           TFVARS: ${{ vars.TF_VARS_PROD }}
         run: printf '%s\n' "$TFVARS" > terraform.tfvars
       - run: terraform init -input=false
-      - run: terraform plan -input=false -lock-timeout=5m -out=tfplan
+      - run: terraform plan -input=false -lock-timeout=5m -no-color -out=tfplan
+      - name: Apply only what was reviewed
+        env:
+          REVIEWED: ${{ needs.plan-main.outputs.fingerprint }}
+        run: |
+          actual="$("$GITHUB_WORKSPACE/.github/scripts/terraform-plan-fingerprint.sh" tfplan)"
+          if [[ -z "$REVIEWED" || "$actual" != "$REVIEWED" ]]; then
+            echo "::error::This plan differs from the one shown in the plan-main job (Azure or the state changed after it was reviewed). Nothing was applied; re-run the workflow and review the new plan."
+            exit 1
+          fi
       - run: terraform apply -input=false tfplan

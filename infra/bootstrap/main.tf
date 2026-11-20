@@ -15,12 +15,15 @@ locals {
   registry_login_server = var.container_registry_login_server != "" ? var.container_registry_login_server : "${lower(var.container_registry_name)}.azurecr.io"
 
   # The Terraform state lives in an existing storage account shared with other projects (see versions.tf).
-  # Its id is built from names rather than read with a data source, which would copy that account's access
+  # Its ids are built from names rather than read with a data source, which would copy that account's access
   # keys into this configuration's state.
-  state_container_id = "/subscriptions/${var.subscription_id}/resourceGroups/${var.state_resource_group_name}/providers/Microsoft.Storage/storageAccounts/${var.state_storage_account_name}/blobServices/default/containers/${var.state_container_name}"
+  state_resource_group_id = "/subscriptions/${var.subscription_id}/resourceGroups/${var.state_resource_group_name}"
+  state_container_id      = "${local.state_resource_group_id}/providers/Microsoft.Storage/storageAccounts/${var.state_storage_account_name}/blobServices/default/containers/${var.state_container_name}"
 
-  # ABAC condition limiting state access to this project's blobs (photo.*) inside the shared container:
-  # reads, writes, leases and deletes need a matching blob path; listings need a matching prefix.
+  # ABAC condition limiting the CI identities to the production state inside the shared container (blobs whose
+  # name starts with var.state_blob_prefix, by default photo.terraform.tfstate and its workspace states):
+  # reads, writes, leases and deletes need a matching blob path; listings need a matching prefix. This
+  # configuration's own state (photo.bootstrap.tfstate) does not match, so CI can neither read nor change it.
   state_blob_condition = <<-EOT
     (
      (
@@ -49,18 +52,33 @@ locals {
     )
   EOT
 
-  # Data-plane roles the deploy identity may grant to the app's managed identities, and nothing else
-  # (constrained delegation: it cannot make anyone Owner or grant itself more rights).
+  # Blob permissions for the custom roles below. None of them can write or delete a container: the built-in
+  # Storage Blob Data roles can, conditions on an assignment do not limit that, and containers/write is also what
+  # authorizes Undelete Blob (restoring soft-deleted blobs). Reading container properties is harmless.
+  container_read_actions = ["Microsoft.Storage/storageAccounts/blobServices/containers/read"]
+  blob_read_actions      = ["Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read"]
+  blob_write_actions = [
+    "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read",
+    "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/write",
+    "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/add/action",
+    "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/delete",
+  ]
+
+  # Roles the deploy identity may grant to the app's managed identities, and nothing else (constrained
+  # delegation: it cannot make anyone Owner or grant itself more rights). Blob write access is only grantable
+  # through the custom role below, never the built-in Storage Blob Data Contributor.
   assignable_roles = [
     "Key Vault Secrets User",
     "Key Vault Crypto User",
     "Key Vault Secrets Officer",
     "Key Vault Crypto Officer",
-    "Storage Blob Data Contributor",
     "Storage Blob Data Reader",
     "Monitoring Metrics Publisher",
   ]
-  assignable_role_guids = join(", ", [for name in local.assignable_roles : basename(data.azurerm_role_definition.assignable[name].id)])
+  assignable_role_guids = join(", ", concat(
+    [for name in local.assignable_roles : basename(data.azurerm_role_definition.assignable[name].id)],
+    [azurerm_role_definition.blob_data_writer.role_definition_id],
+  ))
 }
 
 data "azurerm_role_definition" "assignable" {
@@ -68,12 +86,8 @@ data "azurerm_role_definition" "assignable" {
   name     = each.value
 }
 
-data "azurerm_role_definition" "acr_pull" {
-  name = "AcrPull"
-}
-
 # ---------------------------------------------------------------------------------------------------
-# Application resource group. Images go to the existing, shared container registry
+# Application resource group and identities. Images go to the existing, shared container registry
 # (var.container_registry_*), so CI can push the first images before the Container Apps exist.
 # ---------------------------------------------------------------------------------------------------
 resource "azurerm_resource_group" "app" {
@@ -82,10 +96,52 @@ resource "azurerm_resource_group" "app" {
   tags     = merge(local.tags, { layer = "app" })
 }
 
+# One identity per tier, so each gets only the rights its tier needs (the production configuration grants the
+# Key Vault, storage and telemetry roles). They are created here, by the operator, together with their pull
+# access to the shared registry: CI then needs no right to grant roles on a registry another project uses.
+# The database roles are bound to their object ids, so they must never be recreated.
+resource "azurerm_user_assigned_identity" "app" {
+  for_each            = toset(["web", "worker", "migrator"])
+  name                = "id-${var.project}-${var.environment}-${each.key}"
+  resource_group_name = azurerm_resource_group.app.name
+  location            = azurerm_resource_group.app.location
+  tags                = merge(local.tags, { layer = "app" })
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "azurerm_role_assignment" "app_acr_pull" {
+  for_each             = azurerm_user_assigned_identity.app
+  scope                = local.registry_id
+  role_definition_name = "AcrPull"
+  principal_id         = each.value.principal_id
+  principal_type       = "ServicePrincipal"
+}
+
+# Blob access for the app identities, assigned per container by the production configuration: read, write and
+# delete blobs, nothing else. With the built-in Storage Blob Data Contributor, a compromised web tier could
+# restore staged uploads that ingest had already deleted (blob soft delete keeps them for 7 days) and delete
+# whole containers.
+resource "azurerm_role_definition" "blob_data_writer" {
+  name        = "${var.project}-${var.environment}-blob-data-writer"
+  scope       = azurerm_resource_group.app.id
+  description = "Photo Manager apps: read, write and delete blobs. No container management and no undelete."
+
+  permissions {
+    actions      = local.container_read_actions
+    data_actions = local.blob_write_actions
+  }
+
+  assignable_scopes = [azurerm_resource_group.app.id]
+}
+
 # ---------------------------------------------------------------------------------------------------
 # GitHub Actions identities (OIDC federation: no client secrets stored anywhere).
 #   deploy - used only by jobs in the protected "production" environment (apply, image deploy)
-#   plan   - used by pull-request plans; read-only plus the few "list" actions terraform plan needs
+#   plan   - used by plans (pull requests, and main before an apply is approved); read-only plus the few
+#            "list" actions terraform plan needs
 # They live in their own resource group, outside the app resource group the deploy identity manages, so it
 # cannot edit its own federated credentials (for example to trust another repository).
 # ---------------------------------------------------------------------------------------------------
@@ -125,10 +181,22 @@ resource "azurerm_federated_identity_credential" "github_plan" {
   subject                   = "repo:${var.github_repository}:pull_request"
 }
 
+# Plans of main, shown in the run before anyone approves the apply (.github/workflows/terraform.yml). Azure
+# rejects concurrent changes to one identity's federated credentials, hence the explicit ordering.
+resource "azurerm_federated_identity_credential" "github_plan_main" {
+  name                      = "github-branch-main"
+  user_assigned_identity_id = azurerm_user_assigned_identity.github_plan.id
+  issuer                    = local.github_oidc_issuer
+  audience                  = ["api://AzureADTokenExchange"]
+  subject                   = "repo:${var.github_repository}:ref:refs/heads/main"
+
+  depends_on = [azurerm_federated_identity_credential.github_plan]
+}
+
 # Deploy identity: manage the app resource group, push images, use the state, and assign only the
-# whitelisted data-plane roles (Role Based Access Control Administrator with an ABAC condition), never to
-# itself. Note that this identity is inside the archive's trust boundary regardless: it deploys the worker
-# image. The protected "production" environment (required reviewers) is the control that matters most.
+# whitelisted roles (Role Based Access Control Administrator with an ABAC condition), never to itself. Note
+# that this identity is inside the archive's trust boundary regardless: it deploys the worker image. The
+# protected "production" environment (required reviewers) is the control that matters most.
 resource "azurerm_role_assignment" "deploy_contributor" {
   scope                = azurerm_resource_group.app.id
   role_definition_name = "Contributor"
@@ -169,7 +237,8 @@ resource "azurerm_role_assignment" "deploy_rbac_admin" {
 
 # Registry: push this project's images (photo-web, photo-worker, photo-migrator). AcrPush applies to the whole
 # shared registry; repository-level scoping would require switching the registry to ABAC repository
-# permissions, which would change how the other project's existing role assignments work.
+# permissions, which would change how the other project's existing role assignments work. The deploy identity
+# has no right to grant or remove roles on the registry: the app identities' AcrPull is assigned above.
 resource "azurerm_role_assignment" "deploy_acr_push" {
   scope                = local.registry_id
   role_definition_name = "AcrPush"
@@ -177,47 +246,42 @@ resource "azurerm_role_assignment" "deploy_acr_push" {
   principal_type       = "ServicePrincipal"
 }
 
-# The production configuration grants its app identities AcrPull on the registry. The deploy identity may do
-# exactly that there: assign or remove AcrPull, to anyone but itself.
-resource "azurerm_role_assignment" "deploy_registry_rbac_admin" {
-  scope                = local.registry_id
-  role_definition_name = "Role Based Access Control Administrator"
-  principal_id         = azurerm_user_assigned_identity.github_deploy.principal_id
-  principal_type       = "ServicePrincipal"
-  condition_version    = "2.0"
-  condition            = <<-EOT
-    (
-     (
-      !(ActionMatches{'Microsoft.Authorization/roleAssignments/write'})
-     )
-     OR
-     (
-      @Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {${basename(data.azurerm_role_definition.acr_pull.id)}}
-      AND
-      @Request[Microsoft.Authorization/roleAssignments:PrincipalId] ForAnyOfAllValues:GuidNotEquals {${azurerm_user_assigned_identity.github_deploy.principal_id}}
-     )
-    )
-    AND
-    (
-     (
-      !(ActionMatches{'Microsoft.Authorization/roleAssignments/delete'})
-     )
-     OR
-     (
-      @Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {${basename(data.azurerm_role_definition.acr_pull.id)}}
-     )
-    )
-  EOT
+# State: the CI identities get custom roles on the shared container instead of the built-in Storage Blob Data
+# roles, so they can never delete or reconfigure the container (and with it other projects' state). The roles
+# are defined in the state account's resource group and assigned to the container, with the condition above.
+resource "azurerm_role_definition" "state_writer" {
+  name        = "${var.project}-${var.environment}-terraform-state-writer"
+  scope       = local.state_resource_group_id
+  description = "Photo Manager CI: read, write, lease and delete its Terraform state blobs (narrowed by a condition on the assignment)."
+
+  permissions {
+    actions      = local.container_read_actions
+    data_actions = local.blob_write_actions
+  }
+
+  assignable_scopes = [local.state_resource_group_id]
 }
 
-# State: read and write this project's state blobs (photo.*) in the shared container, nothing else there.
+resource "azurerm_role_definition" "state_reader" {
+  name        = "${var.project}-${var.environment}-terraform-state-reader"
+  scope       = local.state_resource_group_id
+  description = "Photo Manager plans: read its Terraform state blob (narrowed by a condition on the assignment)."
+
+  permissions {
+    actions      = local.container_read_actions
+    data_actions = local.blob_read_actions
+  }
+
+  assignable_scopes = [local.state_resource_group_id]
+}
+
 resource "azurerm_role_assignment" "deploy_state" {
-  scope                = local.state_container_id
-  role_definition_name = "Storage Blob Data Contributor"
-  principal_id         = azurerm_user_assigned_identity.github_deploy.principal_id
-  principal_type       = "ServicePrincipal"
-  condition_version    = var.scope_state_access_to_prefix ? "2.0" : null
-  condition            = var.scope_state_access_to_prefix ? local.state_blob_condition : null
+  scope              = local.state_container_id
+  role_definition_id = azurerm_role_definition.state_writer.role_definition_resource_id
+  principal_id       = azurerm_user_assigned_identity.github_deploy.principal_id
+  principal_type     = "ServicePrincipal"
+  condition_version  = var.scope_state_access_to_prefix ? "2.0" : null
+  condition          = var.scope_state_access_to_prefix ? local.state_blob_condition : null
 }
 
 # Plan identity: Reader plus the Container Apps "listSecrets" actions, which the azurerm provider calls while
@@ -246,39 +310,15 @@ resource "azurerm_role_assignment" "plan_reader" {
   principal_type     = "ServicePrincipal"
 }
 
-# On the shared registry the plan only refreshes the app identities' AcrPull assignments, so it may read the
-# registry resource and its role assignments, but not pull images (which "Reader" would allow).
-resource "azurerm_role_definition" "terraform_planner_registry" {
-  name        = "${var.project}-${var.environment}-terraform-planner-registry"
-  scope       = local.registry_id
-  description = "Lets the Photo Manager plan identity read the shared container registry and its role assignments (no image pulls)."
-
-  permissions {
-    actions = [
-      "Microsoft.ContainerRegistry/registries/read",
-      "Microsoft.Authorization/roleAssignments/read",
-    ]
-  }
-
-  assignable_scopes = [local.registry_id]
-}
-
-resource "azurerm_role_assignment" "plan_registry_reader" {
-  scope              = local.registry_id
-  role_definition_id = azurerm_role_definition.terraform_planner_registry.role_definition_resource_id
+# Plans run with -lock=false (.github/workflows/terraform.yml), so they only need to read the state: code
+# under review can never overwrite or delete it.
+resource "azurerm_role_assignment" "plan_state" {
+  scope              = local.state_container_id
+  role_definition_id = azurerm_role_definition.state_reader.role_definition_resource_id
   principal_id       = azurerm_user_assigned_identity.github_plan.principal_id
   principal_type     = "ServicePrincipal"
-}
-
-# Pull-request plans run with -lock=false (.github/workflows/terraform.yml), so they only need to read the state:
-# code under review can never overwrite or delete it.
-resource "azurerm_role_assignment" "plan_state" {
-  scope                = local.state_container_id
-  role_definition_name = "Storage Blob Data Reader"
-  principal_id         = azurerm_user_assigned_identity.github_plan.principal_id
-  principal_type       = "ServicePrincipal"
-  condition_version    = var.scope_state_access_to_prefix ? "2.0" : null
-  condition            = var.scope_state_access_to_prefix ? local.state_blob_condition : null
+  condition_version  = var.scope_state_access_to_prefix ? "2.0" : null
+  condition          = var.scope_state_access_to_prefix ? local.state_blob_condition : null
 }
 
 # ---------------------------------------------------------------------------------------------------

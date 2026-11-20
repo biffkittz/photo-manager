@@ -8,7 +8,7 @@
 
 # --- Required ----------------------------------------------------------------------------------------------
 
-subscription_id = "3c3f379f-8161-4631-a30c-a3af82622a6a" # az account show --query id -o tsv
+subscription_id = "00000000-0000-0000-0000-000000000000" # az account show --query id -o tsv
 
 # Tag printed by the Deploy workflow's "images only" run: "sha-" plus the first 12 characters of the commit.
 #image_tag = "sha-0123456789ab"
@@ -16,7 +16,7 @@ subscription_id = "3c3f379f-8161-4631-a30c-a3af82622a6a" # az account show --que
 # People allowed to sign in, by numeric GitHub id (ids never change; the login is only for display):
 #   curl -s https://api.github.com/users/<login> | jq .id
 github_users = [
-  { id = 6528701, login = "biffkittz", role = "Admin" }      # Admin: everything, including the Actions page
+  { id = 1234567, login = "your-login", role = "Admin" }     # Admin: everything, including the Actions page
 ]
 # { id = 7654321, login = "family-member", role = "Member" }, # Member: browse, search, upload, download, edit descriptions
 
@@ -42,9 +42,9 @@ key_vault_admin_object_ids = ["11111111-2222-3333-4444-555555555555"] # az ad si
 
 # --- Shared container registry -----------------------------------------------------------------------------
 
-# The login app's registry, which also holds this project's photo-* images (these are the defaults).
-container_registry_name           = "crloginappdemo7fyguj"
-container_registry_resource_group = "rg-loginapp-demo"
+# The login app's registry, which also holds this project's photo-* images (the default). The apps' pull
+# access to it is granted by infra/bootstrap.
+# container_registry_name = "crloginappdemo7fyguj"
 
 # Only if the registry uses a domain name label (its login server then has a hash suffix):
 # container_registry_login_server = "crloginappdemo7fyguj-abcdef1234.azurecr.io"

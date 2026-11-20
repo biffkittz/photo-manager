@@ -54,66 +54,74 @@ public sealed class UploadService(
         var photoId = Guid.CreateVersion7();
         var blobName = BlobNames.Staging(photoId);
         var max = options.Value.MaxFileSizeBytes;
-        string sha256;
+        Photo photo;
         long size;
+        var staged = false;
         try
         {
+            string sha256;
             var blobStream = await blobs.OpenWriteAsync(BlobArea.Staging, blobName, cancellationToken);
+            staged = true;
             var encryptor = await crypto.CreateWebEncryptStreamAsync(blobStream, leaveOpen: false, cancellationToken);
             await using (encryptor)
             {
                 (sha256, size) = await CopyWithLimitAsync(prefix.AsMemory(0, prefixLength), content, encryptor, max, cancellationToken);
                 await encryptor.CompleteAsync(cancellationToken);
             }
+
+            // Fast duplicate feedback (also catches the same file twice in one batch); the database's unique index
+            // on ready content is the authoritative guard against races.
+            var existing = await db.Photos.AsNoTracking()
+                .Where(p => p.Sha256 == sha256 && (p.Status == PhotoStatus.Ready || p.Status == PhotoStatus.Queued || p.Status == PhotoStatus.Processing))
+                .Select(p => (PhotoStatus?)p.Status)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (existing is not null)
+            {
+                await TryDeleteStagingBlobAsync(blobName);
+                return Reject(
+                    StatusCodes.Status409Conflict,
+                    existing == PhotoStatus.Ready ? "This photo is already in the library." : "This photo is already being uploaded.");
+            }
+
+            photo = new Photo
+            {
+                Id = photoId,
+                Source = PhotoSource.Upload,
+                Status = PhotoStatus.Queued,
+                OriginalFileName = FileNames.WithExtension(FileNames.Sanitize(clientFileName), detected.Extension),
+                ContentType = detected.ContentType,
+                SizeBytes = size,
+                Sha256 = sha256,
+                UploadedAt = time.GetUtcNow(),
+                UploadedBy = uploadedBy,
+                UploadedById = uploadedById,
+                UploadBatchId = batchId,
+                DescriptionState = ProcessingState.Pending,
+                RenditionState = ProcessingState.Pending,
+            };
+            db.Photos.Add(photo);
+            await db.SaveChangesAsync(cancellationToken);
         }
         catch (UploadTooLargeException)
         {
-            await blobs.DeleteIfExistsAsync(BlobArea.Staging, blobName, CancellationToken.None);
+            await TryDeleteStagingBlobAsync(blobName);
             return Reject(StatusCodes.Status413PayloadTooLarge, $"Files are limited to {max / (1024 * 1024)} MB.");
         }
         catch
         {
-            await blobs.DeleteIfExistsAsync(BlobArea.Staging, blobName, CancellationToken.None);
+            if (staged)
+            {
+                await TryDeleteStagingBlobAsync(blobName);
+            }
+
             throw;
         }
 
-        // Fast duplicate feedback (also catches the same file twice in one batch); the database's unique index
-        // on ready content is the authoritative guard against races.
-        var existing = await db.Photos.AsNoTracking()
-            .Where(p => p.Sha256 == sha256 && (p.Status == PhotoStatus.Ready || p.Status == PhotoStatus.Queued || p.Status == PhotoStatus.Processing))
-            .Select(p => (PhotoStatus?)p.Status)
-            .FirstOrDefaultAsync(cancellationToken);
-        if (existing is not null)
-        {
-            await blobs.DeleteIfExistsAsync(BlobArea.Staging, blobName, CancellationToken.None);
-            return Reject(
-                StatusCodes.Status409Conflict,
-                existing == PhotoStatus.Ready ? "This photo is already in the library." : "This photo is already being uploaded.");
-        }
-
-        var photo = new Photo
-        {
-            Id = photoId,
-            Source = PhotoSource.Upload,
-            Status = PhotoStatus.Queued,
-            OriginalFileName = FileNames.WithExtension(FileNames.Sanitize(clientFileName), detected.Extension),
-            ContentType = detected.ContentType,
-            SizeBytes = size,
-            Sha256 = sha256,
-            UploadedAt = time.GetUtcNow(),
-            UploadedBy = uploadedBy,
-            UploadedById = uploadedById,
-            UploadBatchId = batchId,
-            DescriptionState = ProcessingState.Pending,
-            RenditionState = ProcessingState.Pending,
-        };
-        db.Photos.Add(photo);
-        await db.SaveChangesAsync(cancellationToken);
         await audit.WriteAsync("photo.upload", photoId.ToString(), new { size, type = detected.ContentType });
 
         try
         {
-            await workflows.StartIngestAsync(photoId, cancellationToken);
+            await workflows.StartIngestAsync(photoId);
         }
         catch (Exception ex) when (TemporalUnavailable.Matches(ex))
         {
@@ -160,7 +168,7 @@ public sealed class UploadService(
 
         try
         {
-            await workflows.StartIngestAsync(photoId, cancellationToken);
+            await workflows.StartIngestAsync(photoId);
         }
         catch (Exception ex) when (TemporalUnavailable.Matches(ex))
         {
@@ -174,6 +182,20 @@ public sealed class UploadService(
 
         await audit.WriteAsync("photo.upload.retry", photoId.ToString(), null);
         return TypedResults.Accepted((string?)null, new UploadAccepted(photoId, photo.Status));
+    }
+
+    private async Task TryDeleteStagingBlobAsync(string blobName)
+    {
+#pragma warning disable CA1031 // Best-effort cleanup must never mask the upload rejection or root failure.
+        try
+        {
+            await blobs.DeleteIfExistsAsync(BlobArea.Staging, blobName, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not delete abandoned staging blob {BlobName}", blobName);
+        }
+#pragma warning restore CA1031
     }
 
     private static UploadOutcome Reject(int status, string title) =>

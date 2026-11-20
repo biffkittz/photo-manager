@@ -13,6 +13,6 @@ the decision, and the consequences we accepted. Superseded records stay, marked 
 | [0006](0006-github-authentication.md) | GitHub OAuth with a numeric-id allowlist and cookie sessions | Accepted |
 | [0007](0007-image-processing-library.md) | ImageSharp 4 with the Six Labors community license | Accepted |
 | [0008](0008-ef-core-lts.md) | EF Core 10 (LTS) on .NET 11 | Accepted |
-| [0009](0009-terraform-state.md) | Terraform state in the existing shared state account, CI scoped to `photo.*` | Accepted |
+| [0009](0009-terraform-state.md) | Terraform state in the existing shared state account, CI limited to the production state by custom roles | Accepted |
 | [0010](0010-duplicates.md) | Byte-identical photos are hidden, never deleted | Accepted |
 | [0011](0011-shared-container-registry.md) | Images in the existing shared container registry | Accepted |
