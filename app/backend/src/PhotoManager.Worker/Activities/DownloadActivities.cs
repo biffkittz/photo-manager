@@ -133,7 +133,7 @@ public sealed class DownloadActivities(
             // Downloads are where originals leave the archive, so each one is logged by the worker itself, whatever
             // the web tier did or did not record in the audit trail.
             logger.LogInformation(
-                "Prepared download {DownloadId} for GitHub user {RequestedById}: {PhotoCount} photos, {PlaintextBytes} bytes",
+                "Prepared download {DownloadId} for user {RequestedById}: {PhotoCount} photos, {PlaintextBytes} bytes",
                 download.Id,
                 download.RequestedById,
                 photos.Count,
@@ -161,7 +161,7 @@ public sealed class DownloadActivities(
         if (preparedLastDay + photoCount > limit)
         {
             logger.LogWarning(
-                "Download {DownloadId} for GitHub user {RequestedById} refused: {PreparedLastDay} photos were prepared in the last 24 hours and {PhotoCount} more would exceed the limit of {Limit}",
+                "Download {DownloadId} for user {RequestedById} refused: {PreparedLastDay} photos were prepared in the last 24 hours and {PhotoCount} more would exceed the limit of {Limit}",
                 download.Id,
                 download.RequestedById,
                 preparedLastDay,

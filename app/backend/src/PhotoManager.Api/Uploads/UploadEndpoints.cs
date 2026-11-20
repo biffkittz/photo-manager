@@ -26,7 +26,7 @@ public static class UploadEndpoints
             .WithMetadata(new RequestSizeLimitAttribute(120L * 1024 * 1024));
         uploads.MapGet("/", ListAsync);
         uploads.MapPost("/{id:guid}/retry", (Guid id, HttpContext http, UploadService service, CancellationToken ct) =>
-            service.RetryAsync(id, http.User.GitHubId(), ct))
+            service.RetryAsync(id, http.User.UserId(), ct))
             .RequireRateLimiting(RateLimitPolicies.Upload);
         return api;
     }
@@ -69,7 +69,7 @@ public static class UploadEndpoints
                 {
                     var fileName = disposition.FileNameStar.HasValue ? disposition.FileNameStar.Value : disposition.FileName.Value;
                     // ?describe=false: the uploader switched AI descriptions off for this upload (default: describe).
-                    var outcome = await service.StageAsync(section.Body, fileName, batchId, http.User.Login(), http.User.GitHubId(), describe ?? true, ct);
+                    var outcome = await service.StageAsync(section.Body, fileName, batchId, http.User.Login(), http.User.UserId(), describe ?? true, ct);
                     return outcome.Problem ?? TypedResults.Accepted((string?)null, outcome.Accepted);
                 }
             }
@@ -84,7 +84,7 @@ public static class UploadEndpoints
 
     private static async Task<IResult> ListAsync(HttpContext http, PhotoDbContext db, Guid? batchId, CancellationToken ct)
     {
-        var userId = http.User.GitHubId();
+        var userId = http.User.UserId();
         var query = db.Photos.AsNoTracking().Where(p => p.UploadedById == userId && p.Source == Core.Domain.PhotoSource.Upload);
         query = batchId is { } batch
             ? query.Where(p => p.UploadBatchId == batch)

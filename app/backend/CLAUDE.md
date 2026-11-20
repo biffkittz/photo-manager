@@ -55,8 +55,11 @@ never read or print it).
 - At most one `Ready` photo per content hash (`ux_photos_sha256_ready`, see `DbErrors`): code that sets a photo
   Ready must handle that unique violation by marking the photo `Duplicate`. The archive is never pruned
   (docs/adr/0010).
-- Ownership (uploads, prepared downloads) and audit actors use the numeric GitHub id (`User.GitHubId()`), never
-  the login. Photo endpoints only expose `Ready` photos.
+- Ownership (uploads, prepared downloads) and audit actors use the user id (`User.UserId()`), never the name: the
+  numeric GitHub id (positive) or the `family_members` id of a Google-invited member (negative), so `!= 0`, never
+  `> 0`, means "signed in". Photo endpoints only expose `Ready` photos.
+- Admins exist only in configuration (`Auth:Users`, GitHub). Members invited from the People page sign in with
+  Google, are recognized only by the Google account id bound when they accept, and are always plain members.
 - Anything that records state and then starts a workflow must undo that state if Temporal is unreachable
   (`TemporalUnavailable`), or the row stays "pending" forever. `PhotoWorkflowClient` starts are deliberately not
   cancellable by the request (a closed tab must not abandon a start halfway); they time out instead.

@@ -97,12 +97,13 @@ public sealed partial class Photo : ITimestamped
     /// <summary>Gets or sets when the photo was uploaded (legacy: the date folder of the object key).</summary>
     public DateTimeOffset UploadedAt { get; set; }
 
-    /// <summary>Gets or sets the GitHub login of the uploader.</summary>
+    /// <summary>Gets or sets the uploader's GitHub login or family member name (display only).</summary>
     public string? UploadedBy { get; set; }
 
     /// <summary>
-    /// Gets or sets the uploader's numeric GitHub id. Ownership checks use this immutable id; <see cref="UploadedBy"/>
-    /// (the login, which can be renamed or re-registered by someone else) is for display only.
+    /// Gets or sets the uploader's user id: the numeric GitHub id (positive) or the <c>family_members</c> id
+    /// (negative). Ownership checks use this immutable id; <see cref="UploadedBy"/> (a login, which can be renamed
+    /// or re-registered by someone else, or a name) is for display only.
     /// </summary>
     public long? UploadedById { get; set; }
 

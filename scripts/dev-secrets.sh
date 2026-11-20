@@ -7,6 +7,8 @@
 # Optional, picked up from your environment if set (needed only to sign in locally):
 #   GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET   GitHub OAuth app with callback http://localhost:5080/signin-github
 #   GITHUB_USER_ID                           your numeric GitHub id: curl -s https://api.github.com/users/<login> | jq .id
+#   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET   Google OAuth client (web application) with the authorized redirect URI
+#                                            http://localhost:5080/signin-google, to try invites locally (optional)
 #
 # NEVER use production secrets here; production secrets live only in Azure Key Vault.
 set -euo pipefail
@@ -43,6 +45,10 @@ if [[ -n "${GITHUB_CLIENT_ID:-}" && -n "${GITHUB_CLIENT_SECRET:-}" ]]; then
   set_secret "$api" "Auth:GitHubClientId" "$GITHUB_CLIENT_ID"
   set_secret "$api" "Auth:GitHubClientSecret" "$GITHUB_CLIENT_SECRET"
 fi
+if [[ -n "${GOOGLE_CLIENT_ID:-}" && -n "${GOOGLE_CLIENT_SECRET:-}" ]]; then
+  set_secret "$api" "Auth:GoogleClientId" "$GOOGLE_CLIENT_ID"
+  set_secret "$api" "Auth:GoogleClientSecret" "$GOOGLE_CLIENT_SECRET"
+fi
 if [[ -n "${GITHUB_USER_ID:-}" ]]; then
   set_secret "$api" "Auth:Users:0:GitHubId" "$GITHUB_USER_ID"
   set_secret "$api" "Auth:Users:0:Role" "Admin"
@@ -53,6 +59,8 @@ fi
 github_client_id="${GITHUB_CLIENT_ID:-$(existing GITHUB_CLIENT_ID)}"
 github_client_secret="${GITHUB_CLIENT_SECRET:-$(existing GITHUB_CLIENT_SECRET)}"
 github_user_id="${GITHUB_USER_ID:-$(existing GITHUB_USER_ID)}"
+google_client_id="${GOOGLE_CLIENT_ID:-$(existing GOOGLE_CLIENT_ID)}"
+google_client_secret="${GOOGLE_CLIENT_SECRET:-$(existing GOOGLE_CLIENT_SECRET)}"
 
 # Written to a private temp file and moved into place, so an interrupted run never leaves a half-written .env.
 umask 077
@@ -65,6 +73,8 @@ DEV_ARCHIVE_PASSWORD=$archive_password
 GITHUB_CLIENT_ID=$github_client_id
 GITHUB_CLIENT_SECRET=$github_client_secret
 GITHUB_USER_ID=$github_user_id
+GOOGLE_CLIENT_ID=$google_client_id
+GOOGLE_CLIENT_SECRET=$google_client_secret
 GEMINI_USE_FAKE=true
 ENV
 chmod 600 "$tmp_env"

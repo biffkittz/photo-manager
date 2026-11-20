@@ -1,9 +1,9 @@
 # Photo Manager
 
 A private, encrypted family photo library at **photo.biffkittz.com**. It browses the existing encrypted archive
-in the Wasabi bucket `photo-bk` (thousands of photos written by `protect.ps1`), lets allowlisted GitHub users
-search, view and download them, and takes bulk uploads that are described by Gemini and then encrypted into
-the archive. Heavy and sensitive work (cryptography, AI calls, indexing) runs on Temporal workers.
+in the Wasabi bucket `photo-bk` (thousands of photos written by `protect.ps1`), lets the family (admins via
+allowlisted GitHub accounts, everyone else via Google after an invite from the app) search, view and download
+them, and takes bulk uploads that are described by Gemini and then encrypted into the archive. Heavy and sensitive work (cryptography, AI calls, indexing) runs on Temporal workers.
 
 - **Frontend:** Vue 3 + TypeScript, Vite, Tailwind CSS, Pinia, TanStack Vue Query, VeeValidate + Zod
 - **Backend:** ASP.NET Core (.NET 11) API serving the SPA; .NET 11 Temporal workers; EF Core + PostgreSQL
@@ -24,7 +24,8 @@ the archive. Heavy and sensitive work (cryptography, AI calls, indexing) runs on
 
 Only the workers can decrypt the archive (the internet-facing tier holds a separate key for previews), all
 secrets live in Key Vault, databases and storage have no public endpoints, Temporal payloads are encrypted
-client-side, sign-in is GitHub OAuth with an allowlist of numeric ids, and sessions are HttpOnly cookies.
+client-side, admins sign in with GitHub OAuth (an allowlist of numeric ids) and invited family members with
+Google (bound to the account id when they accept a one-time invite), and sessions are HttpOnly cookies.
 Details: [docs/security.md](docs/security.md).
 
 ## Quick start (WSL Ubuntu)

@@ -68,7 +68,7 @@ public static partial class RoleProvisioner
             // table privilege also revokes the matching column privileges.)
             var statements = new List<string>
             {
-                $"REVOKE ALL ON {string.Join(", ", DataTables)}, audit_events FROM {quotedRole}",
+                $"REVOKE ALL ON {string.Join(", ", DataTables)}, audit_events, family_members FROM {quotedRole}",
                 $"GRANT CONNECT ON DATABASE \"{databaseName}\" TO {quotedRole}",
                 $"GRANT USAGE ON SCHEMA public TO {quotedRole}",
                 $"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {quotedRole}",
@@ -79,6 +79,10 @@ public static partial class RoleProvisioner
                 statements.AddRange(
                 [
                     $"GRANT SELECT, INSERT, UPDATE ON maintenance_jobs TO {quotedRole}",
+
+                    // People invited from the People page (admins manage them; sign-in reads them). Workers never need
+                    // them, so they get no access at all.
+                    $"GRANT SELECT, INSERT, UPDATE ON family_members TO {quotedRole}",
                     $"GRANT SELECT, INSERT ON photos TO {quotedRole}",
                     $"GRANT UPDATE ({string.Join(", ", WebEditablePhotoColumns)}) ON photos TO {quotedRole}",
 

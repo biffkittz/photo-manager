@@ -7,7 +7,8 @@ import vueDevTools from 'vite-plugin-vue-devtools'
 
 // The API runs on :5081 during development and Vite serves the SPA on :5080, proxying API and OAuth
 // callback paths. One origin (localhost:5080) for every local mode means one GitHub OAuth app
-// (callback http://localhost:5080/signin-github) works for `npm run dev`, buildAndRunSite.sh and compose.
+// (callback http://localhost:5080/signin-github), and optionally one Google OAuth client (redirect URI
+// http://localhost:5080/signin-google), work for `npm run dev`, buildAndRunSite.sh and compose.
 const apiTarget = process.env.API_URL ?? 'http://localhost:5081'
 const proxied = { target: apiTarget, changeOrigin: false, xfwd: true }
 
@@ -24,6 +25,7 @@ export default defineConfig({
     proxy: {
       '/api': proxied,
       '/signin-github': proxied,
+      '/signin-google': proxied,
       '/healthz': proxied,
     },
   },

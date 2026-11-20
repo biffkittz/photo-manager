@@ -102,6 +102,9 @@ services:
       Blob__CreateContainers: "true"
       Auth__GitHubClientId: ${GITHUB_CLIENT_ID:-}
       Auth__GitHubClientSecret: ${GITHUB_CLIENT_SECRET:-}
+      # Optional: Google sign-in for invited family members (both or neither).
+      Auth__GoogleClientId: ${GOOGLE_CLIENT_ID:-}
+      Auth__GoogleClientSecret: ${GOOGLE_CLIENT_SECRET:-}
       Auth__Users__0__GitHubId: ${GITHUB_USER_ID:-0}
       Auth__Users__0__Role: Admin
     ports:

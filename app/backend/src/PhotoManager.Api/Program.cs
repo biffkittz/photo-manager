@@ -3,6 +3,7 @@ using PhotoManager.Api;
 using PhotoManager.Api.Auth;
 using PhotoManager.Api.Downloads;
 using PhotoManager.Api.Jobs;
+using PhotoManager.Api.Members;
 using PhotoManager.Api.Photos;
 using PhotoManager.Api.Security;
 using PhotoManager.Api.Uploads;
@@ -74,10 +75,12 @@ app.UseStaticFiles(new StaticFileOptions
             : "no-cache",
 });
 
-// The GitHub OAuth callback is answered inside UseAuthentication(), before the endpoint rate limiter below ever
-// runs, and each callback makes the server call GitHub. It gets its own per-IP limit, ahead of authentication.
+// The OAuth callbacks (GitHub, Google) are answered inside UseAuthentication(), before the endpoint rate limiter
+// below ever runs, and each callback makes the server call the provider. They get their own per-IP limit, ahead of
+// authentication.
 app.UseWhen(
-    context => context.Request.Path.StartsWithSegments(AuthenticationSetup.CallbackPath),
+    context => context.Request.Path.StartsWithSegments(AuthenticationSetup.CallbackPath)
+        || context.Request.Path.StartsWithSegments(AuthenticationSetup.GoogleCallbackPath),
     callback => callback.UseRateLimiter(RateLimitPolicies.OAuthCallbackOptions()));
 
 app.UseAuthentication();
@@ -95,6 +98,7 @@ api.MapPhotoEndpoints();
 api.MapUploadEndpoints();
 api.MapDownloadEndpoints();
 api.MapJobEndpoints();
+api.MapMemberEndpoints();
 
 // Unknown API routes are real 404s, not the SPA shell.
 app.Map("/api/{**rest}", () => Results.NotFound()).AllowAnonymous();

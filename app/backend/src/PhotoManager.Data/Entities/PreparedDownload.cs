@@ -18,10 +18,10 @@ public sealed class PreparedDownload : ITimestamped
     /// <summary>Gets or sets the photos included (at most a configured maximum).</summary>
     public List<Guid> PhotoIds { get; set; } = [];
 
-    /// <summary>Gets or sets the GitHub login of the requester; only they may fetch the content.</summary>
+    /// <summary>Gets or sets the requester's GitHub login or family member name (display only).</summary>
     public string RequestedBy { get; set; } = string.Empty;
 
-    /// <summary>Gets or sets the requester's numeric GitHub id; only this user may see or fetch the download.</summary>
+    /// <summary>Gets or sets the requester's user id (see <c>Photo.UploadedById</c>); only this user may see or fetch the download.</summary>
     public long RequestedById { get; set; }
 
     /// <summary>Gets or sets the blob holding the web-key-encrypted content.</summary>

@@ -16,3 +16,4 @@ the decision, and the consequences we accepted. Superseded records stay, marked 
 | [0009](0009-terraform-state.md) | Terraform state in the existing shared state account, CI limited to the production state by custom roles | Accepted |
 | [0010](0010-duplicates.md) | Byte-identical photos are hidden, never deleted | Accepted |
 | [0011](0011-shared-container-registry.md) | Images in the existing shared container registry | Accepted |
+| [0012](0012-google-sign-in-for-invited-members.md) | Family members are invited in the app and sign in with Google; admins stay GitHub-only | Accepted |

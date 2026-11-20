@@ -49,6 +49,11 @@ const activeClass = 'bg-surface-muted !text-text'
               >Actions</RouterLink
             >
           </li>
+          <li v-if="isAdmin">
+            <RouterLink to="/people" :class="linkClass" :active-class="activeClass"
+              >People</RouterLink
+            >
+          </li>
         </ul>
       </nav>
       <div v-if="user" class="flex items-center gap-3">

@@ -23,7 +23,7 @@ public sealed class MaintenanceJob : ITimestamped
     /// </summary>
     public string? RunId { get; set; }
 
-    /// <summary>Gets or sets the GitHub login of the requester, or <c>schedule</c>.</summary>
+    /// <summary>Gets or sets the GitHub login of the requesting admin, or <c>schedule</c>.</summary>
     public string RequestedBy { get; set; } = string.Empty;
 
     /// <summary>Gets or sets when the job started running.</summary>

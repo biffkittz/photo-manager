@@ -35,8 +35,16 @@ test('an unreachable server is explained, not treated as signed out, and retried
       : route.fulfill({
           json: {
             authenticated: true,
-            user: { gitHubId: 1001, login: 'octo', name: 'Octo', avatarUrl: null, role: 'Admin' },
+            user: {
+              id: 1001,
+              login: 'octo',
+              name: 'Octo',
+              avatarUrl: null,
+              role: 'Admin',
+              provider: 'github',
+            },
             csrfToken: 'test-csrf',
+            googleSignIn: false,
           },
         }),
   )
@@ -50,4 +58,23 @@ test('an unreachable server is explained, not treated as signed out, and retried
   serverDown = false
   await page.getByRole('button', { name: 'Try again' }).click()
   await expect(page).toHaveURL(/\/uploads$/)
+})
+
+test('family members are offered Google, and invite problems are explained', async ({ page }) => {
+  await mockSession(page, null, { googleSignIn: true })
+  await page.goto('/login?returnUrl=%2Fuploads&error=invite_wrong_account')
+
+  await expect(page.getByRole('alert')).toContainText('for a different Google account')
+  await expect(page.getByRole('link', { name: 'Continue with Google' })).toHaveAttribute(
+    'href',
+    '/api/auth/login/google?returnUrl=%2Fuploads',
+  )
+  await expect(page.getByRole('link', { name: 'Sign in with GitHub' })).toHaveAttribute(
+    'href',
+    '/api/auth/login?returnUrl=%2Fuploads',
+  )
+  await expectAccessible(page)
+
+  await page.goto('/login?error=google_denied')
+  await expect(page.getByRole('alert')).toContainText('That Google account does not have access')
 })

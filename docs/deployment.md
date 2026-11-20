@@ -268,6 +268,9 @@ workstation again, keep your local file identical to `TF_VARS_PROD`.
 
 - https://photo.biffkittz.com/healthz and `/readyz` return 200; the browser shows a valid certificate.
 - Sign in with GitHub; a non-allowlisted account gets "not allowed".
+- Optional, to invite family members who sign in with Google: create the Google OAuth client and store it
+  ([operations.md, "Inviting family members"](operations.md#inviting-family-members-people-page-admins)); you
+  can do this while the vaults are still open in step 5 by adding `--google` to the script.
 - *Actions* page: run **Re-index archive** (imports the existing `protect.ps1` photos), then **Generate missing
   thumbnails** (this also detects byte-identical copies in the archive and hides them), then optionally
   **Generate missing descriptions** (uses Gemini quota).

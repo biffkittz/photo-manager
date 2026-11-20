@@ -18,6 +18,13 @@ export const router = createRouter({
       meta: { public: true, title: 'Sign in' },
     },
     {
+      // Invite links (/invite#<token>) for family members; the token never leaves the page except in one POST.
+      path: '/invite',
+      name: 'invite',
+      component: () => import('@/features/auth/InviteView.vue'),
+      meta: { public: true, title: 'Invitation' },
+    },
+    {
       path: '/gallery',
       name: 'gallery',
       component: () => import('@/features/gallery/GalleryView.vue'),
@@ -46,6 +53,12 @@ export const router = createRouter({
       name: 'actions',
       component: () => import('@/features/jobs/ActionsView.vue'),
       meta: { title: 'Actions', requiresAdmin: true, breadcrumb: [{ label: 'Actions' }] },
+    },
+    {
+      path: '/people',
+      name: 'people',
+      component: () => import('@/features/people/PeopleView.vue'),
+      meta: { title: 'People', requiresAdmin: true, breadcrumb: [{ label: 'People' }] },
     },
     {
       path: '/:pathMatch(.*)*',

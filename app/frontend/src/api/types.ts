@@ -12,18 +12,68 @@ export type JobStatus = 'Queued' | 'Running' | 'Completed' | 'Failed' | 'Cancell
 export type Role = 'Admin' | 'Member'
 export type GallerySort = 'uploaded' | 'taken'
 
+export type SignInProvider = 'github' | 'google'
+
 export interface UserInfo {
-  gitHubId: number
+  /** GitHub id (positive) or invited member id (negative). */
+  id: number
+  /** GitHub login, or an invited member's name. */
   login: string
   name: string | null
   avatarUrl: string | null
   role: Role
+  provider: SignInProvider
 }
 
 export interface SessionResponse {
   authenticated: boolean
   user: UserInfo | null
+  /** Also issued before sign-in (opening an invite link is a POST). */
   csrfToken: string | null
+  /** Whether the sign-in page offers Google (family members invited from the People page). */
+  googleSignIn: boolean
+}
+
+export type MemberStatus = 'Invited' | 'Expired' | 'Active' | 'Removed'
+
+/** Someone invited from the People page (signs in with Google). */
+export interface Member {
+  id: number
+  name: string
+  status: MemberStatus
+  googleEmail: string | null
+  inviteEmail: string | null
+  invitedBy: string
+  inviteExpiresAt: string | null
+  joinedAt: string | null
+  lastSignInAt: string | null
+  removedAt: string | null
+}
+
+/** A GitHub account allowed by configuration (Terraform), shown read-only. */
+export interface ConfiguredAccount {
+  login: string
+  role: Role
+}
+
+export interface PeopleResponse {
+  members: Member[]
+  gitHubAccounts: ConfiguredAccount[]
+  googleSignIn: boolean
+}
+
+/** A new invite link; the token is returned only once. */
+export interface InviteCreated {
+  member: Member
+  token: string
+  expiresAt: string
+}
+
+export interface InvitePreview {
+  name: string
+  invitedBy: string
+  expiresAt: string
+  forSpecificAccount: boolean
 }
 
 export interface PhotoSummary {

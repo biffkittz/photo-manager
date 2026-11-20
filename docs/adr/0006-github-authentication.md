@@ -1,6 +1,7 @@
 # 0006. GitHub OAuth with a numeric-id allowlist and cookie sessions
 
-- Status: Accepted (2026-11-19)
+- Status: Accepted (2026-11-19); amended by [0012](0012-google-sign-in-for-invited-members.md) (2026-11-20):
+  admins still sign in this way, family members are invited in the app and sign in with Google
 
 ## Context
 
@@ -21,5 +22,6 @@ re-registered by someone else; tokens kept in browser storage are readable by an
 ## Consequences
 
 - No tokens in JavaScript-accessible storage; XSS cannot exfiltrate a session token.
-- Adding a user is a Terraform change (and an app restart via the new revision).
+- Adding a user is a Terraform change (and an app restart via the new revision). Since ADR 0012 this applies
+  only to admins (and any GitHub member kept in Terraform); family members are invited in the app.
 - Depends on GitHub availability for sign-in; 2FA on allowlisted accounts is strongly recommended.

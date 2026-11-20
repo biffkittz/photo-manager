@@ -34,8 +34,8 @@ public sealed class UploadService(
     /// <param name="content">The file body (untrusted).</param>
     /// <param name="clientFileName">The client-supplied filename (untrusted; sanitized).</param>
     /// <param name="batchId">Client-generated batch id grouping one upload session.</param>
-    /// <param name="uploadedBy">GitHub login of the uploader (display).</param>
-    /// <param name="uploadedById">Numeric GitHub id of the uploader (ownership).</param>
+    /// <param name="uploadedBy">GitHub login or member name of the uploader (display).</param>
+    /// <param name="uploadedById">User id of the uploader (ownership; see <c>PhotoClaims.UserId</c>).</param>
     /// <param name="describe">False when the uploader switched AI descriptions off: the photo is archived without
     /// waiting for Gemini and left for a later description.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -139,7 +139,7 @@ public sealed class UploadService(
 
     /// <summary>Re-queues a failed upload whose staged copy still exists (staging expires after a day).</summary>
     /// <param name="photoId">The photo.</param>
-    /// <param name="requestedById">Numeric GitHub id of the requester; only the uploader may retry.</param>
+    /// <param name="requestedById">User id of the requester; only the uploader may retry.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The HTTP result.</returns>
     public async Task<IResult> RetryAsync(Guid photoId, long requestedById, CancellationToken cancellationToken)

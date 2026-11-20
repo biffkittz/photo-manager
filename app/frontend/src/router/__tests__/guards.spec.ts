@@ -12,7 +12,12 @@ describe('router guards', () => {
   })
 
   it('sends anonymous users to login with a return URL', async () => {
-    session.mockResolvedValue({ authenticated: false, user: null, csrfToken: null })
+    session.mockResolvedValue({
+      authenticated: false,
+      user: null,
+      csrfToken: null,
+      googleSignIn: false,
+    })
     const { router } = await import('../index')
     await router.push('/uploads')
     expect(router.currentRoute.value.name).toBe('login')
@@ -23,7 +28,8 @@ describe('router guards', () => {
     session.mockResolvedValue({
       authenticated: true,
       csrfToken: 't',
-      user: { gitHubId: 2, login: 'm', name: null, avatarUrl: null, role: 'Member' },
+      googleSignIn: false,
+      user: { id: 2, login: 'm', name: null, avatarUrl: null, role: 'Member', provider: 'github' },
     })
     const { router } = await import('../index')
     await router.push('/actions')

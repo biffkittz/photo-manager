@@ -37,9 +37,9 @@ public static class RateLimitPolicies
         });
 
     /// <summary>
-    /// Options for the limiter in front of the GitHub OAuth callback. The callback is handled by the authentication
+    /// Options for the limiter in front of the OAuth callbacks (GitHub and Google). The callback is handled by the authentication
     /// middleware, so endpoint policies never see it; this limiter runs before authentication and therefore always
-    /// partitions by client IP. Each callback costs the server a request to GitHub (and, for accounts that are not
+    /// partitions by client IP. Each callback costs the server requests to the provider (and, for accounts that are not
     /// allowed, an audit row), so it gets the same budget as the other sign-in endpoints.
     /// </summary>
     /// <returns>Options with a global per-IP limiter.</returns>
@@ -61,7 +61,7 @@ public static class RateLimitPolicies
         // Partition by user when signed in; otherwise by client IP (the real client IP, because forwarded
         // headers from the Container Apps ingress are applied before the limiter runs).
         var key = http.User.Identity?.IsAuthenticated == true
-            ? $"user:{http.User.GitHubId()}"
+            ? $"user:{http.User.UserId()}"
             : $"ip:{http.Connection.RemoteIpAddress}";
         return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
         {

@@ -16,7 +16,7 @@ public sealed class AuditLog(PhotoDbContext db, IHttpContextAccessor http, TimeP
     /// <param name="target">Affected resource id.</param>
     /// <param name="details">Optional small JSON-serializable details.</param>
     /// <param name="actorOverride">Actor when the request is not yet authenticated (during sign-in).</param>
-    /// <param name="actorIdOverride">Numeric GitHub id of <paramref name="actorOverride"/>, when known.</param>
+    /// <param name="actorIdOverride">User id of <paramref name="actorOverride"/> (see <see cref="PhotoClaims.UserId"/>), when known.</param>
     /// <returns>A task that completes when the event is saved.</returns>
     public async Task WriteAsync(string action, string? target, object? details, string? actorOverride = null, long? actorIdOverride = null)
     {
@@ -25,7 +25,7 @@ public sealed class AuditLog(PhotoDbContext db, IHttpContextAccessor http, TimeP
         {
             OccurredAt = time.GetUtcNow(),
             Actor = Truncate(actorOverride ?? context?.User.Login() ?? "system", 100),
-            ActorId = actorIdOverride ?? (context?.User.GitHubId() is > 0 and var id ? id : null),
+            ActorId = actorIdOverride ?? (context?.User.UserId() is not 0 and var id ? id : null),
             Action = action,
             Target = target is null ? null : Truncate(target, 200),
             IpAddress = context?.Connection.RemoteIpAddress?.ToString(),

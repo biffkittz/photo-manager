@@ -8,19 +8,26 @@ export const pixelPng = Buffer.from(
 )
 
 export const admin = {
-  gitHubId: 1,
+  id: 1,
   login: 'octo',
   name: 'Octo Cat',
   avatarUrl: null,
   role: 'Admin',
+  provider: 'github',
 }
 
-export async function mockSession(page: Page, user: typeof admin | null): Promise<void> {
+/** Answers session checks; signed-out visitors get a CSRF token too (opening an invite is a POST). */
+export async function mockSession(
+  page: Page,
+  user: typeof admin | null,
+  options: { googleSignIn?: boolean } = {},
+): Promise<void> {
+  const googleSignIn = options.googleSignIn ?? false
   await page.route('**/api/auth/session', (route) =>
     route.fulfill({
       json: user
-        ? { authenticated: true, user, csrfToken: 'test-csrf' }
-        : { authenticated: false, user: null, csrfToken: null },
+        ? { authenticated: true, user, csrfToken: 'test-csrf', googleSignIn }
+        : { authenticated: false, user: null, csrfToken: 'anonymous-csrf', googleSignIn },
     }),
   )
 }

@@ -9,8 +9,11 @@
 # Usage: scripts/bootstrap-keyvault.sh --web-vault <name> --worker-vault <name> [options]
 #   --rotate-web-key       Generate a new web key; the current one becomes Crypto--WebKeyPrevious
 #   --rotate-payload-key   Generate a new Temporal payload key; the current one becomes Temporal--PayloadKeyPrevious
+#   --google               Also set the Google OAuth client (optional; turns on Google sign-in for family
+#                          members invited from the People page). Without it, missing Google secrets are skipped.
 #   --update <secret>      Re-prompt for a secret that already exists; repeat it for several, or use
 #                          --update all. Secrets: Auth--GitHubClientId Auth--GitHubClientSecret
+#                          Auth--GoogleClientId Auth--GoogleClientSecret
 #                          Temporal--ApiKey (asks for the web key, then the worker key) Crypto--ArchivePassword
 #                          Archive--AccessKeyId Archive--SecretAccessKey Gemini--ApiKey
 #   -h, --help
@@ -24,6 +27,8 @@
 #   TEMPORAL_API_KEY_WEB       API key of the <prefix>-web service account     (web)
 #   GITHUB_CLIENT_ID           GitHub OAuth app client id                      (web)
 #   GITHUB_CLIENT_SECRET       GitHub OAuth app client secret                  (web)
+#   GOOGLE_CLIENT_ID           Google OAuth client id (optional, --google)     (web)
+#   GOOGLE_CLIENT_SECRET       Google OAuth client secret (optional, --google) (web)
 # Secret values are passed to az through permission-600 temporary files, never on a command line (which
 # would expose them in shell history and process listings), and are never printed. After each one the script
 # confirms how many characters it received, and offers to remove spaces or a carriage return that pasting
@@ -32,22 +37,23 @@
 # =================================================================================================
 set -euo pipefail
 
-web_vault=""; worker_vault=""; rotate_web=false; rotate_payload=false; updates=()
+web_vault=""; worker_vault=""; rotate_web=false; rotate_payload=false; google=false; updates=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --web-vault) web_vault="$2"; shift 2 ;;
     --worker-vault) worker_vault="$2"; shift 2 ;;
     --rotate-web-key) rotate_web=true; shift ;;
     --rotate-payload-key) rotate_payload=true; shift ;;
+    --google) google=true; shift ;;
     --update) updates+=("$2"); shift 2 ;;
-    -h|--help) sed -n '3,31p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '3,/^# =====/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done
 [[ -n "$web_vault" && -n "$worker_vault" ]] || { echo "--web-vault and --worker-vault are required (terraform output key_vaults)." >&2; exit 1; }
 
 # A misspelled --update would otherwise silently re-prompt for nothing.
-updatable=(Auth--GitHubClientId Auth--GitHubClientSecret Temporal--ApiKey Crypto--ArchivePassword Archive--AccessKeyId Archive--SecretAccessKey Gemini--ApiKey)
+updatable=(Auth--GitHubClientId Auth--GitHubClientSecret Auth--GoogleClientId Auth--GoogleClientSecret Temporal--ApiKey Crypto--ArchivePassword Archive--AccessKeyId Archive--SecretAccessKey Gemini--ApiKey)
 for name in ${updates[@]+"${updates[@]}"}; do
   [[ "$name" == all ]] && continue
   printf '%s\n' "${updatable[@]}" | grep -qxF -- "$name" \
@@ -165,6 +171,27 @@ ensure() {
   put "$vault" "$name" "$value"
 }
 
+# Like ensure, for a secret the apps can run without (Google sign-in): a missing one is only set with --google or
+# when named explicitly with --update.
+optional() {
+  local vault="$1" name="$2" env_name="$3" label="$4" value selected=false update
+  for update in ${updates[@]+"${updates[@]}"}; do
+    [[ "$update" == "$name" ]] && selected=true
+  done
+  if exists "$vault" "$name"; then
+    if ! selected_for_update "$name"; then
+      echo "  keep $vault/$name"
+      return
+    fi
+  elif ! $google && ! $selected; then
+    echo "  skip $vault/$name (optional; add it with --google)"
+    return
+  fi
+
+  value="$(value_for "$env_name" "$label")"
+  put "$vault" "$name" "$value"
+}
+
 random_key() { head -c 32 /dev/urandom | base64 | tr -d '\n'; }
 
 # Shared random keys: identical in both vaults (the API and the workers must agree on them).
@@ -196,6 +223,17 @@ echo "Web vault ($web_vault)"
 ensure "$web_vault" "Temporal--ApiKey" TEMPORAL_API_KEY_WEB "Temporal API key (web service account)"
 ensure "$web_vault" "Auth--GitHubClientId" GITHUB_CLIENT_ID "GitHub OAuth client id"
 ensure "$web_vault" "Auth--GitHubClientSecret" GITHUB_CLIENT_SECRET "GitHub OAuth client secret"
+optional "$web_vault" "Auth--GoogleClientId" GOOGLE_CLIENT_ID "Google OAuth client id"
+optional "$web_vault" "Auth--GoogleClientSecret" GOOGLE_CLIENT_SECRET "Google OAuth client secret"
+# The web app refuses to start with only one of the two (it validates both-or-neither at startup).
+google_id=false; google_secret=false
+exists "$web_vault" "Auth--GoogleClientId" && google_id=true
+exists "$web_vault" "Auth--GoogleClientSecret" && google_secret=true
+if [[ "$google_id" != "$google_secret" ]]; then
+  echo "Only one of Auth--GoogleClientId and Auth--GoogleClientSecret is set; the web app will not start like this." >&2
+  echo "Run again with --google to set both (or delete the one that is set)." >&2
+  exit 1
+fi
 if az keyvault key show --vault-name "$web_vault" --name dataprotection --query key.kid -o tsv >/dev/null 2>&1; then
   echo "  keep $web_vault/keys/dataprotection"
 else

@@ -40,7 +40,7 @@ public sealed record EmbeddedPhotoMetadata
     /// <summary>Gets when the photo was uploaded.</summary>
     public DateTimeOffset UploadedAt { get; init; }
 
-    /// <summary>Gets the GitHub login of the uploader.</summary>
+    /// <summary>Gets the uploader's GitHub login or family member name.</summary>
     public string? UploadedBy { get; init; }
 }
 

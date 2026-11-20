@@ -25,6 +25,9 @@ public sealed class PhotoDbContext(DbContextOptions<PhotoDbContext> options, Tim
     /// <summary>Gets the audit trail.</summary>
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
+    /// <summary>Gets the people invited from the People page (they sign in with Google).</summary>
+    public DbSet<FamilyMember> Members => Set<FamilyMember>();
+
     /// <inheritdoc />
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {

@@ -12,10 +12,13 @@ public sealed class AuditEvent
     /// <summary>Gets or sets when the event happened.</summary>
     public DateTimeOffset OccurredAt { get; set; }
 
-    /// <summary>Gets or sets the GitHub login (or "anonymous"/"system").</summary>
+    /// <summary>Gets or sets the GitHub login or family member's name (or "anonymous"/"system").</summary>
     public string Actor { get; set; } = string.Empty;
 
-    /// <summary>Gets or sets the actor's numeric GitHub id, when known (logins can change; ids cannot).</summary>
+    /// <summary>
+    /// Gets or sets the actor's user id, when known (names can change; ids cannot): the numeric GitHub id (positive)
+    /// or the <c>family_members</c> id (negative).
+    /// </summary>
     public long? ActorId { get; set; }
 
     /// <summary>Gets or sets the action name, for example <c>auth.signin</c> or <c>photo.download</c>.</summary>

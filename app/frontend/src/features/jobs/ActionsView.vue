@@ -24,7 +24,7 @@ const actions: { kind: JobKind; title: string; description: string }[] = [
     kind: 'ReindexArchive',
     title: 'Re-index archive',
     description:
-      'Scan the Wasabi bucket and import photos added outside the app (for example by protect.ps1). Also runs nightly.',
+      'Scan the Wasabi bucket and import photos added outside the app. Also runs nightly.',
   },
   {
     kind: 'BackfillRenditions',

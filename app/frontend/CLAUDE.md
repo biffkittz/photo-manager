@@ -6,7 +6,7 @@ Read the root `CLAUDE.md` first.
 
 ```bash
 npm ci --ignore-scripts          # install scripts are disabled on purpose (supply chain)
-npm run dev                      # http://localhost:5080, proxies /api and /signin-github to the API on :5081
+npm run dev                      # http://localhost:5080, proxies /api, /signin-github and /signin-google to :5081
 npm run lint:ci && npm run format:check && npm run type-check && npm run test:unit:ci
 npm run test:e2e                 # Playwright + axe against the production build served with the production CSP
 npm audit                        # must stay at 0 vulnerabilities (overrides in package.json)
@@ -14,8 +14,8 @@ npm audit                        # must stay at 0 vulnerabilities (overrides in 
 
 ## Structure
 
-`src/features/<feature>` (auth, gallery, uploads, jobs, errors) holds views and feature components;
-`src/components` shared UI; `src/composables` reusable logic (`useX`); `src/stores` Pinia setup stores;
+`src/features/<feature>` (auth incl. the invite page, gallery, uploads, jobs, people, errors) holds views and
+feature components; `src/components` shared UI; `src/composables` reusable logic (`useX`); `src/stores` Pinia setup stores;
 `src/api` the typed fetch client and Vue Query hooks; `src/utils/zodSchema.ts` the VeeValidate/Zod adapter;
 `src/styles` Tailwind 4 theme tokens. Unit tests live in `__tests__` next to the code; E2E in `e2e/`.
 

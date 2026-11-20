@@ -44,7 +44,7 @@ public sealed class ApiTests(ApiFactory factory)
         Assert.Contains("object-src 'none'", csp, StringComparison.Ordinal);
         Assert.Equal("nosniff", response.Headers.GetValues("X-Content-Type-Options").Single());
         Assert.Equal("DENY", response.Headers.GetValues("X-Frame-Options").Single());
-        Assert.Equal("no-store", response.Headers.CacheControl!.ToString());
+        Assert.True(response.Headers.CacheControl!.NoStore);
         Assert.False(response.Headers.Contains("Server"));
     }
 
@@ -63,11 +63,13 @@ public sealed class ApiTests(ApiFactory factory)
     {
         var anonymous = await factory.ClientFor(null).GetFromJsonAsync<SessionResponse>("/api/auth/session", Json, Ct);
         Assert.False(anonymous!.Authenticated);
-        Assert.Null(anonymous.CsrfToken);
+        Assert.False(string.IsNullOrEmpty(anonymous.CsrfToken), "Signed-out visitors need a token to open an invite link.");
+        Assert.False(anonymous.GoogleSignIn);
 
         var admin = await factory.ClientFor(ApiFactory.AdminId).GetFromJsonAsync<SessionResponse>("/api/auth/session", Json, Ct);
         Assert.True(admin!.Authenticated);
         Assert.Equal(PhotoRoles.Admin, admin.User!.Role);
+        Assert.Equal(ApiFactory.AdminId, admin.User.Id);
         Assert.False(string.IsNullOrEmpty(admin.CsrfToken));
     }
 

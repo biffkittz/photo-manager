@@ -34,7 +34,8 @@ flowchart LR
 
 | Threat | Main controls |
 |---|---|
-| Stranger reaches the photos | GitHub sign-in with a server-side allowlist of **numeric** GitHub ids (logins can be renamed and re-registered); allowlist re-checked on every request, so removal is immediate; everything under `/api` requires a session |
+| Stranger reaches the photos | Admins: GitHub sign-in with a server-side allowlist of **numeric** GitHub ids (logins can be renamed and re-registered). Family members: Google sign-in, only after accepting a one-time invite link from an admin, recognized by the Google account's permanent id, never the email address. Access is re-checked on every request, so removal is immediate; everything under `/api` requires a session |
+| Invite link misused | 256-bit token in the URL fragment (never sent in a request line, so not in logs), stored only as a hash; works once, for 7 days, and a new link voids the old one; optionally limited to one Google address that Google reports as verified; the opened invite is re-checked when the person comes back from Google; the linked account's email is shown on the People page and every acceptance or refusal is audited. Invited people can only ever be members |
 | Web tier compromised (RCE, dependency) | **Split keys**: the web tier never holds the archive password or Wasabi credentials, so it can neither copy and decrypt the archive offline nor delete it ([ADR 0001](adr/0001-split-keys.md)). It can ask the workers for downloads, as any family member can; the workers bound that (at most 2,000 photos a day for everyone together, each download logged by the worker) and decrypt only objects that belong to the photo record, which the web tier's database role cannot repoint. Blob roles: read-only on renditions and downloads, and no container rights at all (so no restoring staged uploads that ingest deleted); its database role cannot delete anything |
 | Cross-site attacks (CSRF, XSS, clickjacking) | `__Host-` HttpOnly Secure SameSite=Lax cookies; antiforgery token required in the `X-CSRF-TOKEN` header for every state-changing API call (only the header is accepted: a request without it is refused before its body is read, so no upload is ever buffered to disk for a token check); strict CSP (`script-src 'self'`, no inline script or style, `frame-ancestors 'none'`); no `v-html` anywhere (lint rule) and all text rendered escaped |
 | Session theft | HttpOnly cookies (no tokens in localStorage/sessionStorage), 8 hour sliding lifetime and a 24 hour absolute lifetime (a replayed cookie cannot be kept alive forever), Data Protection key ring wrapped by a Key Vault key; sign-out or an expired session also drops every cached photo and queued upload in the browser |
@@ -45,8 +46,8 @@ flowchart LR
 | Database exposure | No public endpoint (VNet-integrated); Entra-only authentication (no passwords exist); per-tier roles with least-privilege grants; TLS with certificate verification (`SslMode=VerifyFull`); no photo bytes stored |
 | Storage/Key Vault exposure | Public network access disabled; private endpoints only; shared keys disabled (Entra RBAC only); Key Vault purge protection; audit logs to Log Analytics |
 | Temporal Cloud breach | Every payload and failure message is AES-256-GCM encrypted client-side, and payloads that are not encrypted with the payload key are rejected (no plaintext inputs can be injected); workflows carry only ids; one namespace-scoped service account per tier |
-| Abuse/brute force | Per-user/IP fixed-window rate limits (auth 30/min, expensive operations 30/min, uploads and upload retries 300/min, API 1200/min); the GitHub sign-in callback, which the authentication middleware answers before the endpoint limiter runs, has its own 30/min per-IP limit; the unauthenticated readiness probe reuses its database check for 5 seconds, so it cannot be used to flood the database |
-| One user acting on another's data | Uploads and prepared downloads belong to the numeric GitHub id that created them (never the login, which can be renamed or re-registered); other users get 404. Only finished photos are visible or editable through the photo endpoints |
+| Abuse/brute force | Per-user/IP fixed-window rate limits (auth 30/min, expensive operations 30/min, uploads and upload retries 300/min, API 1200/min); the GitHub and Google sign-in callbacks, which the authentication middleware answers before the endpoint limiter runs, have their own 30/min per-IP limit; the unauthenticated readiness probe reuses its database check for 5 seconds, so it cannot be used to flood the database |
+| One user acting on another's data | Uploads and prepared downloads belong to the user id that created them: the numeric GitHub id, or an invited member's (negative) id, never a login or name, which can change; other users get 404. Only finished photos are visible or editable through the photo endpoints |
 | Tampering with archive files | v2 is authenticated encryption (chunked AES-256-GCM, header bound into keys, truncation detection); legacy files have no integrity protection (see residual risks). Workers check a file's key type from its header before resolving any key, so web-key data (which the web tier can write) can never trigger an archive-password derivation |
 | Supply chain | Locked restores (`packages.lock.json`, `npm ci --ignore-scripts`), NuGet/npm audit in CI, Dependabot, SHA-pinned GitHub Actions, digest-pinned base images, CodeQL, Trivy, gitleaks, SBOM + provenance on release images |
 | CI/CD credential abuse | Keyless Azure access (OIDC federation); the plan identity is read-only, including the Terraform state (plans run with `-lock=false`); both CI identities reach only the production state (`photo.terraform.tfstate`, never the bootstrap's own state) in the shared state container (ABAC), through custom roles that cannot delete or reconfigure the container; the deploy identity can only grant a fixed list of roles, never to itself, and has no role-assignment rights on the shared registry (the operator creates the app identities and their pull access in `infra/bootstrap`); the CI identities live outside the resource group they manage; write-capable third-party secrets exist only in the reviewer-protected `production` environment; an apply runs only the plan that was shown before approval, and a deployment only the newest commit on `main` |
@@ -55,12 +56,19 @@ flowchart LR
 
 ## Authentication and authorization
 
-- GitHub OAuth (authorization code + **PKCE**, empty scope: the app never sees your repositories or email).
-- Access is decided by `Auth:Users` (Terraform `github_users`): numeric id + role. Unknown accounts are rejected
-  and audited (`auth.denied`).
+- **Admins** (and any GitHub member kept in Terraform): GitHub OAuth (authorization code + **PKCE**, empty
+  scope: the app never sees your repositories or email). Access is decided by `Auth:Users` (Terraform
+  `github_users`): numeric id + role. Unknown accounts are rejected and audited (`auth.denied`).
+- **Family members** (optional; needs the Google OAuth client in the web vault): invited from the People page,
+  they sign in with Google OAuth (authorization code + PKCE, scopes `openid email` only; the access token is
+  discarded). The invite link is accepted once, binding the Google account's permanent id (`sub`) to the member;
+  later sign-ins match that id only. Members can never be admins: admin rights exist only in configuration.
+  Each request re-checks that the member has not been removed and is still linked to the same Google account.
+  Details: [ADR 0012](adr/0012-google-sign-in-for-invited-members.md).
 - Roles: **Member** (browse, search, upload, download, edit descriptions, request an AI description or a
   rendition rebuild for one photo) and **Admin** (also maintenance jobs: re-index, backfills, cancellation).
-- Recommendation: require two-factor authentication on every allowlisted GitHub account.
+- Recommendation: require two-factor authentication on every allowlisted GitHub account, and suggest Google's
+  2-Step Verification to invited family members. Prefer invites limited to the person's Google address.
 
 ## Audit trail
 
@@ -75,7 +83,7 @@ photo count, size) to Application Insights, independently of the web tier.
 | Secret | Store | Readers |
 |---|---|---|
 | Archive password, Wasabi keys, Gemini key, worker Temporal key | Worker Key Vault | Worker identity only |
-| GitHub OAuth secret, web Temporal key, Data Protection wrapping key | Web Key Vault | Web identity only |
+| GitHub OAuth secret, Google OAuth client secret (optional), web Temporal key, Data Protection wrapping key | Web Key Vault | Web identity only |
 | Web key, payload key | Both vaults | Both identities |
 | Cloudflare token, Temporal Cloud admin key, Six Labors license | GitHub `production` environment secrets | Approved deploy/apply jobs |
 | Read-only Cloudflare token and Temporal Cloud key | GitHub repository secrets | Pull-request Terraform plans |
@@ -102,6 +110,8 @@ throwaway keys from `scripts/dev-secrets.sh` in `dotnet user-secrets` and a giti
 ## Before going live (checklist)
 
 - [ ] Production GitHub OAuth app created; all allowlisted accounts use 2FA.
+- [ ] If family members are invited: Google OAuth client with only the redirect URI
+  `https://photo.biffkittz.com/signin-google`, app published, both secrets in the web vault.
 - [ ] Bucket-scoped Wasabi key in Key Vault (not the account root key); bucket versioning stays on.
 - [ ] API key authentication enabled on the `photo.joqqs` namespace.
 - [ ] Gemini API project on the paid tier (or descriptions disabled).

@@ -1,9 +1,10 @@
 # Architecture
 
 Photo Manager is a private photo library for a family archive that already lives, encrypted, in the Wasabi
-bucket `photo-bk` (written over the years by `protect.ps1`). The app lets allowlisted GitHub users browse,
-search, download and upload photos. Every photo stays encrypted at rest; new uploads get an AI description
-(Gemini) before they are encrypted into the archive.
+bucket `photo-bk` (written over the years by `protect.ps1`). The app lets the family browse, search, download
+and upload photos: admins sign in with allowlisted GitHub accounts, and family members, invited from the app's
+People page, with Google. Every photo stays encrypted at rest; new uploads get an AI description (Gemini)
+before they are encrypted into the archive.
 
 ## Components
 
@@ -43,7 +44,7 @@ flowchart LR
 
 | Component | Technology | Responsibility |
 |---|---|---|
-| Web (`ca-photo-web`) | ASP.NET Core 11, Kestrel :8080, Vue 3 SPA in `wwwroot` | GitHub sign-in, gallery/search API, streams renditions and prepared downloads (decrypting with the **web key**), stages uploads, starts workflows |
+| Web (`ca-photo-web`) | ASP.NET Core 11, Kestrel :8080, Vue 3 SPA in `wwwroot` | GitHub and Google sign-in, invites, gallery/search API, streams renditions and prepared downloads (decrypting with the **web key**), stages uploads, starts workflows |
 | Worker (`ca-photo-worker`) | .NET 11, Temporal .NET SDK | All archive cryptography, Gemini calls, renditions, indexing, downloads. No public ingress |
 | Migrator (`caj-photo-migrate`) | .NET 11 console, Container Apps Job | Applies EF Core migrations and least-privilege PostgreSQL grants inside the VNet |
 | PostgreSQL | Azure Database for PostgreSQL flexible server | Photo metadata, jobs, downloads, audit log. No photo bytes |

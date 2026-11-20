@@ -16,6 +16,8 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref<UserInfo | null>(null)
   const csrfToken = ref<string | null>(null)
   const loaded = ref(false)
+  /** Whether the sign-in page offers Google (for family members invited from the People page). */
+  const googleSignIn = ref(false)
   /** True when the last session check got no answer (offline, server error); the next navigation asks again. */
   const unreachable = ref(false)
   let loading: Promise<void> | null = null
@@ -63,6 +65,7 @@ export const useAuthStore = defineStore('auth', () => {
 
     unreachable.value = false
     loaded.value = true
+    googleSignIn.value = session.googleSignIn === true
     if (session.authenticated) {
       user.value = session.user
     } else {
@@ -116,6 +119,7 @@ export const useAuthStore = defineStore('auth', () => {
     user,
     csrfToken,
     loaded,
+    googleSignIn,
     unreachable,
     isAuthenticated,
     isAdmin,

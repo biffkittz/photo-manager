@@ -124,13 +124,66 @@ same limits in the API's `Downloads` section, plus 3 downloads in preparation pe
   most 1 GB (`Imaging:DecodeMemoryLimitMegabytes`); beyond that a decode fails and Temporal retries it later,
   instead of the container running out of memory. Raise both only together with the worker's memory.
 
+## Inviting family members (People page, admins)
+
+Admins are the GitHub accounts in Terraform (`github_users`). Everyone else is invited from the **People** page
+and signs in with a Google account; no GitHub account and no Terraform change are needed. Invited people are
+always **members** (browse, search, upload, download, edit descriptions), never admins. See
+[ADR 0012](adr/0012-google-sign-in-for-invited-members.md).
+
+### One-time setup: the Google OAuth client
+
+Until this is done the People page says "Google sign-in is not set up yet", and the sign-in page offers only
+GitHub.
+
+1. In the [Google Cloud console](https://console.cloud.google.com/), create (or pick) a project for Photo
+   Manager, open **Google Auth Platform** (formerly *OAuth consent screen*) and configure it: app name
+   *Photo Manager*, your support email, audience **External**. Add no scopes beyond the basic ones (the app
+   asks only for `openid` and `email`).
+2. Publish the app (**Audience > Publish app**). While it is in *Testing*, only the test users you list there can
+   sign in. With only the basic scopes, Google does not require a verification review to publish.
+3. **Clients > Create client**: type **Web application**, authorized redirect URI exactly
+   `https://photo.biffkittz.com/signin-google` (no JavaScript origins are needed). Copy the client id and secret.
+   For local development, create a separate client with `http://localhost:5080/signin-google` and pass it to
+   `scripts/dev-secrets.sh` (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`).
+4. Store both in the web vault, as in [Re-entering secrets](#re-entering-secrets), with `--google` instead of
+   `--update ...` (the script asks for both values), then restart the web app.
+
+To switch Google sign-in off again, delete both secrets (`az keyvault secret delete --vault-name <web vault>
+--name Auth--GoogleClientId`, and the same for `Auth--GoogleClientSecret`) and restart the web app: invited
+people are signed out on their next request and can no longer sign in; GitHub accounts are not affected. The
+web app refuses to start with only one of the two secrets.
+
+### Inviting, new links and removing access
+
+- **Invite someone**: enter the name they should appear under and, recommended, the Google account email they
+  will use, then **Create invite link**, copy the link and send it to them (text or email). The link works
+  **once**, for **7 days**, and is shown only then (the server keeps only a hash of it; if it gets lost, create a
+  new link). With an email address, only that Google account (as verified by Google) can accept; without one,
+  whoever opens the link first can, so send it only to that person.
+- **Accepting**: they open the link, see who invited them, choose **Continue with Google** and pick their
+  account. From then on they use **Continue with Google** on the sign-in page. Their Google account is
+  recognized by its permanent account id, not the email address, so changing their Gmail address does not
+  matter. The People page shows the linked account's email address, so you can check that the right person
+  accepted.
+- **New link** (invite pending or expired) replaces the previous link; the old one stops working at once.
+- **Remove** (or **Cancel invite**) takes effect on their next request: they are signed out everywhere and
+  cannot sign in again. Their uploads stay in the library. **Invite again** sends a new link and forgets the
+  previously linked Google account: whoever accepts the new link is linked instead. (To link a different Google
+  account for someone who still has access, remove them first, then invite them again.)
+
+Everything is recorded in the audit trail: `member.invite`, `member.invite.renew`, `member.remove`,
+`member.join`, `member.join.denied` (with the reason and the Google email that tried), and `auth.signin` /
+`auth.denied` with `"provider": "google"`. Members' user ids are negative (`-1`, `-2`, ...) in `uploaded_by_id`,
+`requested_by_id` and the audit trail's `actor_id`; GitHub ids are positive.
+
 ## Sessions
 
 Sign-in sessions end after 8 hours without activity (`Auth:SessionLifetime`) and in any case 24 hours after
-signing in with GitHub (`Auth:MaxSessionLifetime`); removing someone from `github_users` ends their session on
-their next request. Signing out (or the session ending) in one browser tab ends it in the browser's other tabs
-of the app as well, and a tab re-checks the session when it comes back to the foreground. The GitHub sign-in
-callback accepts at most 30 requests a minute per IP address.
+signing in (`Auth:MaxSessionLifetime`); removing someone from `github_users` or from the People page ends their
+session on their next request. Signing out (or the session ending) in one browser tab ends it in the browser's
+other tabs of the app as well, and a tab re-checks the session when it comes back to the foreground. The GitHub
+and Google sign-in callbacks accept at most 30 requests a minute per IP address.
 
 ### Sign-in problems
 
@@ -138,8 +191,8 @@ callback accepts at most 30 requests a minute per IP address.
   `github_users` (recorded as `auth.denied` in the audit trail). Check which account the browser is signed in to
   on github.com, and the numeric id: `curl -s https://api.github.com/users/<login> | jq .id`. The ids the app
   uses: `az containerapp show -g rg-photo-prod -n ca-photo-web --query "properties.template.containers[0].env[?starts_with(name, 'Auth__Users')]" -o table`.
-- "Signing in with GitHub did not complete." is any other failure. The web app logs the reason as a warning:
-  `az containerapp logs show -g rg-photo-prod -n ca-photo-web --tail 200 | grep "GitHub sign-in failed"`.
+- "Signing in did not complete." is any other failure. The web app logs the reason as a warning:
+  `az containerapp logs show -g rg-photo-prod -n ca-photo-web --tail 200 | grep "sign-in failed"`.
   Typical reasons: `redirect_uri_mismatch` (the production OAuth app's callback must be exactly
   `https://photo.biffkittz.com/signin-github`), `incorrect_client_credentials` (the client id or secret in the
   web vault is not the production OAuth app's: update them with `scripts/bootstrap-keyvault.sh --update
@@ -148,6 +201,19 @@ callback accepts at most 30 requests a minute per IP address.
   `'__Host-pm-correlation…' cookie not found` (the browser did not send back the cookie set when the sign-in
   started: cookies blocked for the site, or the sign-in started on a different host name than
   `photo.biffkittz.com`; releases before 2026-11-20 also had a cookie path bug that caused it every time).
+  For Google, `redirect_uri_mismatch` means the client's redirect URI is not exactly
+  `https://photo.biffkittz.com/signin-google`, and `invalid_client` that the client id or secret in the web vault
+  is wrong.
+- "That Google account does not have access." (`auth.denied`, provider `google`): the account is not linked to
+  anyone with access. Either they never accepted an invite, accepted with a different Google account, or were
+  removed. Send a new link from the People page.
+- "That invite link no longer works": it expired, was used, was replaced by a newer link, or the person was
+  removed (also if you sent a new link while they were signing in). Send a new link.
+- "That invite is for a different Google account": the invite is limited to an email address, and they chose
+  another Google account (or Google has not verified that address). The audit trail's `member.join.denied`
+  shows which address tried.
+- "That Google account already has access": they accepted an earlier invite with this account (possibly under
+  another name); one Google account can belong to one person only.
 
 ## Container registry storage
 

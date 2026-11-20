@@ -11,7 +11,8 @@ const { useAuthStore, SESSION_CHANNEL } = await import('../auth')
 const signedIn: SessionResponse = {
   authenticated: true,
   csrfToken: 't',
-  user: { gitHubId: 1, login: 'octo', name: null, avatarUrl: null, role: 'Member' },
+  googleSignIn: false,
+  user: { id: 1, login: 'octo', name: null, avatarUrl: null, role: 'Member', provider: 'github' },
 }
 
 describe('auth store', () => {
@@ -25,7 +26,15 @@ describe('auth store', () => {
     session.mockResolvedValue({
       authenticated: true,
       csrfToken: 't',
-      user: { gitHubId: 1, login: 'octo', name: null, avatarUrl: null, role: 'Admin' },
+      googleSignIn: false,
+      user: {
+        id: 1,
+        login: 'octo',
+        name: null,
+        avatarUrl: null,
+        role: 'Admin',
+        provider: 'github',
+      },
     })
     const auth = useAuthStore()
 
@@ -64,9 +73,12 @@ describe('auth store', () => {
   })
 
   it('ends the session locally when the server says it has ended', async () => {
-    session
-      .mockResolvedValueOnce(signedIn)
-      .mockResolvedValueOnce({ authenticated: false, csrfToken: null, user: null })
+    session.mockResolvedValueOnce(signedIn).mockResolvedValueOnce({
+      authenticated: false,
+      csrfToken: null,
+      user: null,
+      googleSignIn: false,
+    })
     const auth = useAuthStore()
     const cleanup = vi.fn<() => void>()
     auth.onSessionEnded(cleanup)
@@ -122,7 +134,15 @@ describe('auth store', () => {
     session.mockResolvedValue({
       authenticated: true,
       csrfToken: 't',
-      user: { gitHubId: 1, login: 'octo', name: null, avatarUrl: null, role: 'Member' },
+      googleSignIn: false,
+      user: {
+        id: 1,
+        login: 'octo',
+        name: null,
+        avatarUrl: null,
+        role: 'Member',
+        provider: 'github',
+      },
     })
     logout.mockRejectedValue(new Error('offline'))
     const auth = useAuthStore()
@@ -136,7 +156,15 @@ describe('auth store', () => {
     session.mockResolvedValue({
       authenticated: true,
       csrfToken: 't',
-      user: { gitHubId: 1, login: 'octo', name: null, avatarUrl: null, role: 'Member' },
+      googleSignIn: false,
+      user: {
+        id: 1,
+        login: 'octo',
+        name: null,
+        avatarUrl: null,
+        role: 'Member',
+        provider: 'github',
+      },
     })
     const auth = useAuthStore()
     const cleanup = vi.fn<() => void>()
@@ -148,5 +176,21 @@ describe('auth store', () => {
     await auth.ensureLoaded()
     auth.clear()
     expect(cleanup).toHaveBeenCalledOnce()
+  })
+
+  it('knows whether Google sign-in is offered, and keeps the token issued before sign-in', async () => {
+    session.mockResolvedValue({
+      authenticated: false,
+      user: null,
+      csrfToken: 'anonymous',
+      googleSignIn: true,
+    })
+    const auth = useAuthStore()
+
+    await auth.ensureLoaded()
+
+    expect(auth.isAuthenticated).toBe(false)
+    expect(auth.googleSignIn).toBe(true)
+    expect(auth.csrfToken).toBe('anonymous')
   })
 })

@@ -53,7 +53,7 @@ public static class DownloadEndpoints
 
         var ids = request.PhotoIds.Distinct().ToList();
         var now = time.GetUtcNow();
-        var userId = http.User.GitHubId();
+        var userId = http.User.UserId();
         var activePending = await db.Downloads.CountAsync(
             d => d.RequestedById == userId && d.Status == DownloadStatus.Pending && d.ExpiresAt > now,
             ct);
@@ -178,12 +178,12 @@ public static class DownloadEndpoints
         return Results.Stream(plaintext, download.ContentType, fileDownloadName: FileNames.Sanitize(download.FileName));
     }
 
-    // Downloads are private to their requester (matched by the immutable GitHub id, never the login): other
+    // Downloads are private to their requester (matched by the immutable user id, never the name): other
     // signed-in users get 404, not 403, so ids do not leak.
     private static Task<PreparedDownload?> FindOwnAsync(Guid id, HttpContext http, PhotoDbContext db, CancellationToken ct)
     {
-        var userId = http.User.GitHubId();
-        return db.Downloads.AsNoTracking().SingleOrDefaultAsync(d => d.Id == id && d.RequestedById == userId && userId > 0, ct);
+        var userId = http.User.UserId();
+        return db.Downloads.AsNoTracking().SingleOrDefaultAsync(d => d.Id == id && d.RequestedById == userId && userId != 0, ct);
     }
 
     private static DownloadResponse ToResponse(PreparedDownload d) =>

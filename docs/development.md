@@ -67,6 +67,11 @@ Every local mode (Vite dev server, `buildAndRunSite.sh`, the compose `web` conta
 `http://localhost:5080`, so this one OAuth app works for all of them. Use a **separate** OAuth app for
 production.
 
+To try invites and Google sign-in locally, also pass a development Google OAuth client (type *Web application*,
+redirect URI `http://localhost:5080/signin-google`) as `GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=...`. Without
+it, the sign-in page offers only GitHub and the People page cannot create invites. Setting up the client is
+described in [operations.md](operations.md#one-time-setup-the-google-oauth-client).
+
 ### ImageSharp license
 
 ImageSharp 4 (thumbnails, previews, Gemini input) checks a Six Labors license at build time. **Debug builds
