@@ -13,6 +13,9 @@ subscription_id = "00000000-0000-0000-0000-000000000000" # az account show --que
 # project           = "photo"
 # environment       = "prod"
 # github_repository = "biffkittz/photo-manager" # the repository whose workflows may sign in to Azure
+# Its numeric owner and repository ids, as in the "subject claim" azure/login prints:
+#   repo:biffkittz@6528701/photo-manager@1464743054:environment:production
+# github_repository_ids = { owner = 6528701, repository = 1464743054 }
 
 # --- Shared container registry (defaults) ------------------------------------------------------------------
 

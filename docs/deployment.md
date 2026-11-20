@@ -100,6 +100,14 @@ terraform -chdir=infra/bootstrap output -json                                  #
 names). Set `container_registry_login_server` only if the registry's login server is not
 `crloginappdemo7fyguj.azurecr.io`.
 
+GitHub signs its OIDC tokens with the repository's immutable subject,
+`repo:biffkittz@6528701/photo-manager@1464743054:...` (owner and repository with their numeric ids), and the
+federated credentials must match it exactly. Those ids are the defaults of `github_repository_ids`. If
+azure/login ever fails with `AADSTS700213: No matching federated identity record`, compare the "subject claim"
+it prints with the credentials (`az identity federated-credential list -g rg-photo-cicd --identity-name
+id-photo-github-deploy -o table`), set `github_repository_ids` (or `null` for the classic `repo:<owner>/<name>`
+form) and apply the bootstrap again.
+
 If Azure rejects the storage role assignments' conditions (`scope_state_access_to_prefix`), set that variable
 to `false`: the identities then get the role on the whole `terraform` container. See
 [infra/README.md](../infra/README.md#state).
@@ -158,9 +166,13 @@ then is the images-only deployment of step 3.
 The Container Apps need an image to exist before Terraform creates them:
 
 *Actions > Deploy > Run workflow*, branch **main**, with **images_only** checked, then approve the run. It
-builds and pushes the three images and skips everything else. The run summary shows the image tag:
-`sha-` followed by the first 12 characters of the commit (`git rev-parse --short=12 origin/main` gives the
-same). You need it in step 4.
+builds and pushes the three images and skips everything else. Run it on the newest commit of `main`: a run whose
+commit is no longer the tip is skipped (its summary says "Not deployed").
+
+The image tag is `sha-` followed by the first 12 characters of that commit. It is shown on the run's
+**Summary** page and in the log of the **Image tag** step of the *deploy* job; locally,
+`git fetch && echo "sha-$(git rev-parse origin/main | cut -c1-12)"` gives the same. Use it in step 4 once the run
+has **succeeded** (before that, the images do not exist).
 
 ## 4. Infrastructure (first apply: apps scaled to zero)
 

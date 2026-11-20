@@ -58,6 +58,7 @@ get access to this project's `photo.*` blobs in the existing, shared Terraform s
 | container\_registry\_resource\_group | Resource group of the existing container registry (same subscription). | `string` | `"rg-loginapp-demo"` | no |
 | environment | Environment name (part of resource names). | `string` | `"prod"` | no |
 | github\_repository | GitHub repository (owner/name) whose Actions may sign in to Azure with OIDC. | `string` | `"biffkittz/photo-manager"` | no |
+| github\_repository\_ids | Numeric ids of the repository's owner and of the repository, for GitHub's immutable OIDC subject format (repo:<owner>@<owner id>/<name>@<repository id>:...), which survives renames and cannot be claimed by a re-registered account or repository. Shown as "subject claim" in the azure/login log, or: gh api repos/<owner>/<name> --jq '.owner.id, .id'. Null only if your tokens use the classic format (repo:<owner>/<name>:...). | ```object({ owner = number repository = number })``` | ```{ "owner": 6528701, "repository": 1464743054 }``` | no |
 | location | Azure region for all resources. | `string` | `"centralus"` | no |
 | project | Short project name used in resource names. | `string` | `"photo"` | no |
 | registry\_cleanup\_dry\_run | Only log what the clean-up would delete (az acr task logs); nothing is removed. | `bool` | `false` | no |

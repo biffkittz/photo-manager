@@ -30,6 +30,23 @@ variable "github_repository" {
   description = "GitHub repository (owner/name) whose Actions may sign in to Azure with OIDC."
   type        = string
   default     = "biffkittz/photo-manager"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$", var.github_repository))
+    error_message = "github_repository must be owner/name."
+  }
+}
+
+variable "github_repository_ids" {
+  description = "Numeric ids of the repository's owner and of the repository, for GitHub's immutable OIDC subject format (repo:<owner>@<owner id>/<name>@<repository id>:...), which survives renames and cannot be claimed by a re-registered account or repository. Shown as \"subject claim\" in the azure/login log, or: gh api repos/<owner>/<name> --jq '.owner.id, .id'. Null only if your tokens use the classic format (repo:<owner>/<name>:...)."
+  type = object({
+    owner      = number
+    repository = number
+  })
+  default = {
+    owner      = 6528701
+    repository = 1464743054
+  }
 }
 
 variable "container_registry_name" {

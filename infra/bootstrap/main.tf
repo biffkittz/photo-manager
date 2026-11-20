@@ -8,6 +8,21 @@ locals {
 
   github_oidc_issuer = "https://token.actions.githubusercontent.com"
 
+  # Subject prefix of this repository's GitHub OIDC tokens. GitHub issues the immutable form, which pins the
+  # numeric owner and repository ids (repo:<owner>@<id>/<name>@<id>), so a renamed, deleted or re-registered
+  # account or repository can never inherit this trust; the classic form is kept for var.github_repository_ids = null.
+  github_subject_prefix = (
+    var.github_repository_ids == null
+    ? "repo:${var.github_repository}"
+    : format(
+      "repo:%s@%d/%s@%d",
+      split("/", var.github_repository)[0],
+      var.github_repository_ids.owner,
+      split("/", var.github_repository)[1],
+      var.github_repository_ids.repository,
+    )
+  )
+
   # The container registry is an existing one shared with another project. Like the state account below, it is
   # referenced by name rather than read with a data source, which would copy its admin password (if the admin
   # user is enabled) into this configuration's state.
@@ -183,7 +198,7 @@ resource "azurerm_federated_identity_credential" "github_deploy" {
   user_assigned_identity_id = azurerm_user_assigned_identity.github_deploy.id
   issuer                    = local.github_oidc_issuer
   audience                  = ["api://AzureADTokenExchange"]
-  subject                   = "repo:${var.github_repository}:environment:production"
+  subject                   = "${local.github_subject_prefix}:environment:production"
 }
 
 resource "azurerm_user_assigned_identity" "github_plan" {
@@ -198,7 +213,7 @@ resource "azurerm_federated_identity_credential" "github_plan" {
   user_assigned_identity_id = azurerm_user_assigned_identity.github_plan.id
   issuer                    = local.github_oidc_issuer
   audience                  = ["api://AzureADTokenExchange"]
-  subject                   = "repo:${var.github_repository}:pull_request"
+  subject                   = "${local.github_subject_prefix}:pull_request"
 }
 
 # Plans of main, shown in the run before anyone approves the apply (.github/workflows/terraform.yml). Azure
@@ -208,7 +223,7 @@ resource "azurerm_federated_identity_credential" "github_plan_main" {
   user_assigned_identity_id = azurerm_user_assigned_identity.github_plan.id
   issuer                    = local.github_oidc_issuer
   audience                  = ["api://AzureADTokenExchange"]
-  subject                   = "repo:${var.github_repository}:ref:refs/heads/main"
+  subject                   = "${local.github_subject_prefix}:ref:refs/heads/main"
 
   depends_on = [azurerm_federated_identity_credential.github_plan]
 }

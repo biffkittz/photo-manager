@@ -43,7 +43,8 @@ jobs:
     outputs:
       current: ${{ steps.tip.outputs.current }}
     steps:
-      - id: tip
+      - name: Newest commit on main?
+        id: tip
         env:
           GH_TOKEN: ${{ github.token }}
           COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
@@ -51,9 +52,12 @@ jobs:
           tip="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)"
           if [[ "$tip" == "$COMMIT" ]]; then
             echo "current=true" >> "$GITHUB_OUTPUT"
+            echo "Image tag: sha-${COMMIT::12}"
+            echo "**Image tag:** \`sha-${COMMIT::12}\` (images exist once the deploy job has pushed them)" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "current=false" >> "$GITHUB_OUTPUT"
             echo "::notice::Not deploying ${COMMIT::12}: main has moved on to ${tip::12}, which is deployed by its own run."
+            echo "**Not deployed:** \`${COMMIT::12}\` is no longer the newest commit on main (\`${tip::12}\` is). No images were built." >> "$GITHUB_STEP_SUMMARY"
           fi
 
   deploy:
@@ -81,7 +85,8 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
-      - id: tag
+      - name: Image tag
+        id: tag
         run: |
           echo "tag=sha-${COMMIT::12}" >> "$GITHUB_OUTPUT"
           echo "Image tag: sha-${COMMIT::12}"
