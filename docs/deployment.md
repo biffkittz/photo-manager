@@ -157,7 +157,8 @@ Also enable *Code security*: Dependabot alerts/updates, secret scanning with **p
 CodeQL (the workflow is included). Protect `main` (require pull requests and the CI checks).
 
 **Until step 7 is done**, pushes to `main` start runs that cannot succeed yet: a *Deploy* run (after CI) and, when
-`infra/` changed, a *Terraform* run whose `plan-main` job fails without `TF_VARS_PROD`. **Reject** their
+`infra/` changed, a *Terraform* run whose `plan-main` job fails: without `TF_VARS_PROD`, and before step 4 also
+because the production state does not exist yet (plans may only read it, never create it). **Reject** their
 approval requests; the first apply is done from your workstation in step 4. The only run to approve before
 then is the images-only deployment of step 3.
 

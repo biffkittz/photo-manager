@@ -81,7 +81,16 @@ jobs:
           TEMPORAL_CLOUD_API_KEY_READONLY: ${{ secrets.TEMPORAL_CLOUD_API_KEY_READONLY }}
         run: '"$GITHUB_WORKSPACE/.github/scripts/require-config.sh" AZURE_CLIENT_ID_PLAN AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID TF_VARS_PROD CLOUDFLARE_API_TOKEN_READONLY TEMPORAL_CLOUD_API_KEY_READONLY'
       # The backend (existing state storage, Entra ID auth) is configured in versions.tf.
-      - run: terraform init -input=false
+      # The read-only plan identity cannot create the state: before the first apply (docs/deployment.md, step 4)
+      # the azurerm backend tries to write an empty one during init, which fails with a bare 403.
+      - name: terraform init
+        run: |
+          if ! terraform init -input=false 2>&1 | tee init.log; then
+            if grep -q 'failed to lock azure state' init.log && grep -q 'The specified blob does not exist' init.log; then
+              echo "::error::The production state does not exist yet, and plans may only read it. Do the first apply from your workstation (docs/deployment.md, step 4), then re-run this workflow."
+            fi
+            exit 1
+          fi
       # -lock=false: the plan identity can only read the state, so code under review can never modify it.
       # (Runs are serialized by the workflow's concurrency group.)
       - run: terraform plan -input=false -lock=false -no-color -out=tfplan
@@ -132,7 +141,16 @@ jobs:
           CLOUDFLARE_API_TOKEN_READONLY: ${{ secrets.CLOUDFLARE_API_TOKEN_READONLY }}
           TEMPORAL_CLOUD_API_KEY_READONLY: ${{ secrets.TEMPORAL_CLOUD_API_KEY_READONLY }}
         run: '"$GITHUB_WORKSPACE/.github/scripts/require-config.sh" AZURE_CLIENT_ID_PLAN AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID TF_VARS_PROD CLOUDFLARE_API_TOKEN_READONLY TEMPORAL_CLOUD_API_KEY_READONLY'
-      - run: terraform init -input=false
+      # The read-only plan identity cannot create the state: before the first apply (docs/deployment.md, step 4)
+      # the azurerm backend tries to write an empty one during init, which fails with a bare 403.
+      - name: terraform init
+        run: |
+          if ! terraform init -input=false 2>&1 | tee init.log; then
+            if grep -q 'failed to lock azure state' init.log && grep -q 'The specified blob does not exist' init.log; then
+              echo "::error::The production state does not exist yet, and plans may only read it. Do the first apply from your workstation (docs/deployment.md, step 4), then re-run this workflow."
+            fi
+            exit 1
+          fi
       - run: terraform plan -input=false -lock=false -no-color -out=tfplan
       - name: Plan to review before approving the apply
         run: |
