@@ -8,7 +8,7 @@ namespace PhotoManager.IntegrationTests;
 internal static class TestImages
 {
     /// <summary>Creates a unique JPEG (random noise keeps hashes unique across runs) with an EXIF capture date.</summary>
-    public static byte[] Jpeg(int width = 1600, int height = 1200)
+    public static byte[] Jpeg(int width = 1600, int height = 1200, string? offsetTimeOriginal = null)
     {
         using var image = new Image<Rgb24>(width, height);
         var random = new Random(Guid.NewGuid().GetHashCode());
@@ -26,6 +26,12 @@ internal static class TestImages
 
         image.Metadata.ExifProfile = new ExifProfile();
         image.Metadata.ExifProfile.SetValue(ExifTag.DateTimeOriginal, "2024:07:04 18:22:01");
+        if (offsetTimeOriginal is not null)
+        {
+            // What phones record: the camera's time zone, which makes the capture time a non-UTC DateTimeOffset.
+            image.Metadata.ExifProfile.SetValue(ExifTag.OffsetTimeOriginal, offsetTimeOriginal);
+        }
+
         using var output = new MemoryStream();
         image.SaveAsJpeg(output);
         return output.ToArray();

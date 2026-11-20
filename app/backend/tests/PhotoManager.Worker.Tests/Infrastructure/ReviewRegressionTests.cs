@@ -53,6 +53,9 @@ public sealed class ReviewRegressionTests
         var inspection = await processor.InspectAsync(jpeg, Ct);
 
         Assert.Equal(new DateTimeOffset(2024, 7, 5, 0, 30, 0, TimeSpan.Zero), inspection.TakenAt!.Value.ToUniversalTime());
+
+        // ...and is handed over in UTC: PostgreSQL (Npgsql) refuses DateTimeOffset values with another offset.
+        Assert.Equal(TimeSpan.Zero, inspection.TakenAt.Value.Offset);
     }
 
     [Fact]
@@ -100,6 +103,35 @@ public sealed class ReviewRegressionTests
             DownloadActivities.EnsureEstimatedSizeWithinLimit([long.MaxValue, 1], long.MaxValue));
         Assert.Equal("TooLarge", overflow.ErrorType);
         Assert.True(overflow.NonRetryable);
+    }
+
+    [Fact]
+    public void Unexpected_activity_errors_reach_temporal_compact_and_retryable()
+    {
+        // A database error's full chain of causes and stack traces exceeded Temporal's failure size limit, so the
+        // Temporal UI showed "Failure exceeds size limit" instead of the cause.
+        var error = new InvalidOperationException("outer", new ArgumentException(new string('x', 5000)));
+
+        Assert.True(ActivityErrors.TryTranslate(error, out var translated));
+
+        var failure = Assert.IsType<ApplicationFailureException>(translated);
+        Assert.Equal(nameof(InvalidOperationException), failure.ErrorType);
+        Assert.False(failure.NonRetryable);
+        Assert.Null(failure.InnerException);
+        Assert.StartsWith("ArgumentException: xxx", failure.Message, StringComparison.Ordinal);
+        Assert.True(failure.Message.Length <= 1000);
+
+        // Gemini overload (503 without Retry-After) is retried with the policy's backoff, as one compact line.
+        Assert.True(ActivityErrors.TryTranslate(new GeminiTransientException("Gemini returned HTTP 503.") { RetryAfter = null }, out var overloaded));
+        var gemini = Assert.IsType<ApplicationFailureException>(overloaded);
+        Assert.Equal("GeminiTransient", gemini.ErrorType);
+        Assert.False(gemini.NonRetryable);
+        Assert.Null(gemini.NextRetryDelay);
+        Assert.Null(gemini.InnerException);
+
+        // Cancellation and failures that already are Temporal failures pass through untouched.
+        Assert.False(ActivityErrors.TryTranslate(new OperationCanceledException(), out _));
+        Assert.False(ActivityErrors.TryTranslate(ActivityErrors.Permanent(ActivityErrors.NotFound, "gone"), out _));
     }
 
     [Fact]

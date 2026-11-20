@@ -64,6 +64,19 @@ public sealed class PhotoDbContext(DbContextOptions<PhotoDbContext> options, Tim
 
     private void StampTimestamps()
     {
+        // timestamp with time zone stores an instant, and Npgsql refuses to write a DateTimeOffset with a non-zero
+        // offset (an EXIF capture time keeps the camera's). Every value is normalized to the same instant in UTC.
+        foreach (var entry in ChangeTracker.Entries().Where(e => e.State is EntityState.Added or EntityState.Modified))
+        {
+            foreach (var property in entry.Properties)
+            {
+                if (property.CurrentValue is DateTimeOffset { Offset.Ticks: not 0 } value)
+                {
+                    property.CurrentValue = value.ToUniversalTime();
+                }
+            }
+        }
+
         var now = _timeProvider.GetUtcNow();
         foreach (var photo in ChangeTracker.Entries<Photo>().Where(e => e.State is EntityState.Added or EntityState.Modified))
         {

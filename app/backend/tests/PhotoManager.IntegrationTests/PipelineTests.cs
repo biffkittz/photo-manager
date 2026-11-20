@@ -82,7 +82,7 @@ public sealed class PipelineTests(LocalStackFixture stack)
         Assert.SkipUnless(LocalStackFixture.Enabled, "Set PHOTOMANAGER_INTEGRATION=1 with docker compose running.");
 
         // An object exactly as protect.ps1 would have written it.
-        var jpeg = TestImages.Jpeg(1200, 900);
+        var jpeg = TestImages.Jpeg(1200, 900, offsetTimeOriginal: "-04:00");
         var key = $"2024-05-01/integration_{Guid.NewGuid():N}_beach_day.jpg.encrypted";
         var temp = Path.GetTempFileName();
         try
@@ -114,6 +114,10 @@ public sealed class PipelineTests(LocalStackFixture stack)
         legacy = await stack.WithDbAsync(db => db.Photos.AsNoTracking().SingleAsync(p => p.Id == legacy.Id));
         Assert.Equal(ProcessingState.Ready, legacy.RenditionState);
         Assert.Equal((1200, 900), (legacy.Width, legacy.Height));
+
+        // 18:22:01 at -04:00 (the camera's zone) is stored as the same instant in UTC. A non-UTC value used to make
+        // every save of a phone photo fail ("only offset 0 (UTC) is supported").
+        Assert.Equal(new DateTimeOffset(2024, 7, 4, 22, 22, 1, TimeSpan.Zero), legacy.TakenAt);
         Assert.NotNull(legacy.Sha256);
 
         await stack.Workflows.StartDescribeAsync(legacy.Id);

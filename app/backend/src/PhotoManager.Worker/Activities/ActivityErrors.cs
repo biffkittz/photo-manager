@@ -3,6 +3,7 @@ using PhotoManager.Core.Crypto;
 using PhotoManager.Infrastructure.Gemini;
 using PhotoManager.Infrastructure.Imaging;
 using PhotoManager.Infrastructure.Storage;
+using Temporalio.Activities;
 using Temporalio.Exceptions;
 
 namespace PhotoManager.Worker.Activities;
@@ -16,6 +17,8 @@ namespace PhotoManager.Worker.Activities;
 internal static class ActivityErrors
 {
     public const string UnsupportedImage = "UnsupportedImage";
+
+    private const int MaxFailureMessageLength = 1000;
     public const string DecryptionFailed = "DecryptionFailed";
     public const string KeyUnavailable = "KeyUnavailable";
     public const string NotFound = "NotFound";
@@ -48,12 +51,41 @@ internal static class ActivityErrors
             StorageObjectNotFoundException => Permanent(NotFound, "The stored file could not be found.", exception),
             PhotoDescriptionRejectedException => Permanent(DescriptionRejected, exception.Message, exception),
 
-            // Honour the server's Retry-After instead of the policy's backoff for rate limiting.
-            GeminiTransientException { RetryAfter: { } delay } => new ApplicationFailureException(exception.Message, exception, "GeminiTransient", nonRetryable: false, nextRetryDelay: delay),
-            _ => exception,
+            // Rate limiting or overload at Gemini (429, 5xx): retried, honouring the server's Retry-After when it sends
+            // one instead of the policy's backoff. GeminiPhotoDescriber has already logged Gemini's reason.
+            GeminiTransientException transient => new ApplicationFailureException(exception.Message, inner: null, errorType: "GeminiTransient", nonRetryable: false, nextRetryDelay: transient.RetryAfter),
+
+            // Already a Temporal failure, or the activity being cancelled: propagate unchanged.
+            TemporalException or OperationCanceledException => exception,
+            _ => Unexpected(exception),
         };
 
         return !ReferenceEquals(failure, exception);
+    }
+
+    /// <summary>
+    /// Anything unexpected stays retryable but reaches Temporal as a compact failure: the type and message of the
+    /// innermost exception, without stack traces or the chain of causes. A database error's full chain is too large
+    /// for Temporal ("Failure exceeds size limit"), which then shows nothing of the cause. The full exception is
+    /// logged by the worker.
+    /// </summary>
+    /// <param name="exception">The unexpected exception.</param>
+    /// <returns>A retryable failure whose error type is the exception's type name.</returns>
+    internal static ApplicationFailureException Unexpected(Exception exception)
+    {
+        if (ActivityExecutionContext.HasCurrent)
+        {
+            ActivityExecutionContext.Current.Logger.LogWarning(exception, "Activity failed with an unexpected error; Temporal retries it while attempts remain");
+        }
+
+        var root = exception.GetBaseException();
+        var message = $"{root.GetType().Name}: {root.Message}";
+        if (message.Length > MaxFailureMessageLength)
+        {
+            message = message[..MaxFailureMessageLength];
+        }
+
+        return new ApplicationFailureException(message, inner: null, errorType: exception.GetType().Name, nonRetryable: false);
     }
 
     /// <summary>True when an activity failed with one of the <see cref="PermanentTypes"/>.</summary>

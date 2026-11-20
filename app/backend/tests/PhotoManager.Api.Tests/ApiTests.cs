@@ -545,6 +545,24 @@ public sealed class ApiTests(ApiFactory factory)
     }
 
     [Fact]
+    public async Task Timestamps_with_a_time_zone_offset_are_stored_as_utc()
+    {
+        // Npgsql refuses to write a DateTimeOffset whose offset is not zero; the context normalizes every value.
+        var id = Guid.CreateVersion7();
+        var takenAt = new DateTimeOffset(2024, 7, 4, 18, 22, 1, TimeSpan.FromHours(-4));
+        await factory.WithDbAsync(async db =>
+        {
+            db.Photos.Add(new Photo { Id = id, Source = PhotoSource.Archive, Status = PhotoStatus.Ready, EncryptionFormat = EncryptionFormat.LegacyV1, ArchiveKey = $"2024-07-04/{id:N}.jpg.encrypted", OriginalFileName = "offset.jpg", ContentType = "image/jpeg", UploadedAt = DateTimeOffset.UtcNow, TakenAt = takenAt });
+            return await db.SaveChangesAsync(Ct);
+        });
+
+        var stored = await factory.WithDbAsync(db => db.Photos.AsNoTracking().Where(p => p.Id == id).Select(p => p.TakenAt).SingleAsync(Ct));
+
+        Assert.Equal(takenAt, stored); // the same instant
+        Assert.Equal(TimeSpan.Zero, stored!.Value.Offset);
+    }
+
+    [Fact]
     public async Task Web_database_role_cannot_point_a_photo_at_another_archive_object()
     {
         var id = await SeedReadyPhotoAsync(null, "web-role.jpg");

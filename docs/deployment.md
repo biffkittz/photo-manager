@@ -287,7 +287,8 @@ flowchart LR
 ```
 
 - Images are tagged `sha-<commit>`; Terraform ignores image changes, so infrastructure applies never roll
-  back a release.
+  back a release. Changing `image_tag` after the first apply therefore does nothing: release through the
+  *Deploy* workflow (or, for a specific tag, the rollback commands below).
 - The deploy waits for each new revision to report *Running* and *Healthy* (the previous revision keeps
   serving until then); a revision that fails to start fails the workflow.
 - **Rollback:** `az containerapp update -g rg-photo-prod -n ca-photo-web --image <acr>/photo-web:sha-<previous>`

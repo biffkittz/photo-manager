@@ -188,6 +188,28 @@ schedule-to-start p99 above 30 minutes; workflow task failures (non-determinism)
 Key Vault secret reads by an unexpected identity; 5xx rate on the web app; any `refused: ... photos were prepared
 in the last 24 hours` warning from the worker (the daily download limit was reached).
 
+### Why did an activity fail?
+
+The Temporal UI shows only the error **type** of a failed activity (`DbUpdateException`, `GeminiTransient`, ...);
+the message reads "Encoded failure" because every failure is encrypted with the payload key before it reaches
+Temporal Cloud. The readable reason is in the worker's console log. The live stream (`az containerapp logs show`)
+keeps only the last few hundred lines; Log Analytics keeps everything:
+
+```bash
+ws=$(az monitor log-analytics workspace show -g rg-photo-prod -n log-photo-prod --query customerId -o tsv)
+az monitor log-analytics query -w "$ws" --timespan PT6H -o table --analytics-query '
+  ContainerAppConsoleLogs_CL
+  | where ContainerAppName_s == "ca-photo-worker" and Log_s has_any ("warn:", "fail:", "Exception")
+  | where not(Log_s startswith "   at ")
+  | summarize hits = count(), latest = max(TimeGenerated) by line = substring(Log_s, 0, 250)
+  | order by hits desc | take 20'
+```
+
+`GeminiTransient` means Gemini rate-limited the request (429) or was overloaded (503, "This model is currently
+experiencing high demand"). Those are retried with growing pauses (up to 8 attempts); photos still without a
+description afterwards are picked up by the next **Generate missing descriptions** run. If it persists for hours,
+run the job later, or check your Gemini quota.
+
 ## Error reporting
 
 Server errors go to Application Insights (stack traces stay server-side; clients get a ProblemDetails body

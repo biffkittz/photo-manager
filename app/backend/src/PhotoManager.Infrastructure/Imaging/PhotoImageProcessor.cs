@@ -172,7 +172,9 @@ public sealed class PhotoImageProcessor : IDisposable
         {
             try
             {
-                return new DateTimeOffset(local, utcOffset);
+                // The offset says which instant the camera-local time means; the instant is then stored as UTC
+                // (PostgreSQL timestamptz has no offset, and Npgsql refuses non-UTC DateTimeOffset values).
+                return new DateTimeOffset(local, utcOffset).ToUniversalTime();
             }
             catch (ArgumentOutOfRangeException)
             {
