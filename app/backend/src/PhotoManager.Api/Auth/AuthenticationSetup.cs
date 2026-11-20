@@ -45,6 +45,7 @@ public static class AuthenticationSetup
 
         // In production every cookie is __Host- prefixed: Secure, Path=/, no Domain, so no sibling subdomain can
         // set or read it. Local development runs over plain http://localhost, where the prefix is not allowed.
+        // Browsers silently drop a __Host- cookie whose path is not "/", so every cookie sets it explicitly.
         var secure = !environment.IsDevelopment();
         var cookiePrefix = secure ? "__Host-" : string.Empty;
 
@@ -52,6 +53,7 @@ public static class AuthenticationSetup
             .AddCookie(options =>
             {
                 options.Cookie.Name = $"{cookiePrefix}pm-session";
+                options.Cookie.Path = "/";
                 options.Cookie.HttpOnly = true;
                 options.Cookie.SameSite = SameSiteMode.Lax;
                 options.Cookie.SecurePolicy = secure ? CookieSecurePolicy.Always : CookieSecurePolicy.SameAsRequest;
@@ -100,6 +102,11 @@ public static class AuthenticationSetup
                 options.ClaimActions.MapJsonKey(PhotoClaims.AvatarUrl, "avatar_url");
                 options.ClaimActions.MapJsonKey(PhotoClaims.DisplayName, "name");
                 options.CorrelationCookie.Name = $"{cookiePrefix}pm-correlation";
+
+                // ASP.NET Core scopes this cookie to the callback path (/signin-github) by default, which the browser
+                // refuses for a __Host- cookie: the cookie was never stored and every sign-in failed with
+                // "Correlation failed" in production.
+                options.CorrelationCookie.Path = "/";
                 options.CorrelationCookie.SameSite = SameSiteMode.Lax;
                 options.CorrelationCookie.SecurePolicy = secure ? CookieSecurePolicy.Always : CookieSecurePolicy.SameAsRequest;
 
@@ -162,6 +169,7 @@ public static class AuthenticationSetup
             options.HeaderName = AntiforgeryValidationFilter.HeaderName;
             options.SuppressReadingTokenFromFormBody = true;
             options.Cookie.Name = $"{cookiePrefix}pm-csrf";
+            options.Cookie.Path = "/";
             options.Cookie.SameSite = SameSiteMode.Strict;
             options.Cookie.SecurePolicy = secure ? CookieSecurePolicy.Always : CookieSecurePolicy.SameAsRequest;
         });

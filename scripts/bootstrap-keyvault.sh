@@ -9,7 +9,10 @@
 # Usage: scripts/bootstrap-keyvault.sh --web-vault <name> --worker-vault <name> [options]
 #   --rotate-web-key       Generate a new web key; the current one becomes Crypto--WebKeyPrevious
 #   --rotate-payload-key   Generate a new Temporal payload key; the current one becomes Temporal--PayloadKeyPrevious
-#   --update <secret>      Re-prompt for one secret that already exists (e.g. Gemini--ApiKey)
+#   --update <secret>      Re-prompt for a secret that already exists; repeat it for several, or use
+#                          --update all. Secrets: Auth--GitHubClientId Auth--GitHubClientSecret
+#                          Temporal--ApiKey (asks for the web key, then the worker key) Crypto--ArchivePassword
+#                          Archive--AccessKeyId Archive--SecretAccessKey Gemini--ApiKey
 #   -h, --help
 #
 # Values are taken from these environment variables when set, otherwise prompted for (input hidden):
@@ -22,24 +25,42 @@
 #   GITHUB_CLIENT_ID           GitHub OAuth app client id                      (web)
 #   GITHUB_CLIENT_SECRET       GitHub OAuth app client secret                  (web)
 # Secret values are passed to az through permission-600 temporary files, never on a command line (which
-# would expose them in shell history and process listings), and are never printed.
+# would expose them in shell history and process listings), and are never printed. After each one the script
+# confirms how many characters it received, and offers to remove spaces or a carriage return that pasting
+# (for example from Windows into WSL) can add at either end.
 # After changing secrets, restart the apps: az containerapp revision restart (docs/operations.md).
 # =================================================================================================
 set -euo pipefail
 
-web_vault=""; worker_vault=""; rotate_web=false; rotate_payload=false; update=""
+web_vault=""; worker_vault=""; rotate_web=false; rotate_payload=false; updates=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --web-vault) web_vault="$2"; shift 2 ;;
     --worker-vault) worker_vault="$2"; shift 2 ;;
     --rotate-web-key) rotate_web=true; shift ;;
     --rotate-payload-key) rotate_payload=true; shift ;;
-    --update) update="$2"; shift 2 ;;
-    -h|--help) sed -n '3,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --update) updates+=("$2"); shift 2 ;;
+    -h|--help) sed -n '3,31p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done
 [[ -n "$web_vault" && -n "$worker_vault" ]] || { echo "--web-vault and --worker-vault are required (terraform output key_vaults)." >&2; exit 1; }
+
+# A misspelled --update would otherwise silently re-prompt for nothing.
+updatable=(Auth--GitHubClientId Auth--GitHubClientSecret Temporal--ApiKey Crypto--ArchivePassword Archive--AccessKeyId Archive--SecretAccessKey Gemini--ApiKey)
+for name in ${updates[@]+"${updates[@]}"}; do
+  [[ "$name" == all ]] && continue
+  printf '%s\n' "${updatable[@]}" | grep -qxF -- "$name" \
+    || { echo "--update: unknown secret '$name'. Use one of: all ${updatable[*]}" >&2; exit 1; }
+done
+
+selected_for_update() {
+  local name
+  for name in ${updates[@]+"${updates[@]}"}; do
+    [[ "$name" == all || "$name" == "$1" ]] && return 0
+  done
+  return 1
+}
 command -v az >/dev/null || { echo "Azure CLI not found." >&2; exit 1; }
 az account show >/dev/null 2>&1 || { echo "Run 'az login' first." >&2; exit 1; }
 
@@ -100,23 +121,48 @@ copy() { # copies a secret between names/vaults without exposing it on the termi
   echo "  copied $from_vault/$from_name -> $to_vault/$to_name"
 }
 
-value_for() { # env var value or hidden prompt
-  local env_name="$1" label="$2" value="${!1:-}"
-  if [[ -z "$value" ]]; then
-    read -r -s -p "$label: " value </dev/tty; echo >&2
+# Env var value or hidden prompt, printed to stdout for capture. Everything shown to the operator goes to stderr
+# and reports only the length, never the value.
+value_for() {
+  local env_name="$1" label="$2" value="${!1:-}" trimmed answer attempt
+  if [[ -n "$value" ]]; then
+    echo "    using \$$env_name from the environment" >&2
+  else
+    for attempt in 1 2 3; do
+      # IFS= keeps the input exactly as entered; whitespace is only removed after asking, below.
+      IFS= read -r -s -p "  $label (hidden; paste or type, then Enter): " value </dev/tty
+      echo >&2
+      [[ -n "$value" ]] && break
+      echo "    nothing received (attempt $attempt of 3)" >&2
+    done
   fi
-  [[ -n "$value" ]] || { echo "A value for $label is required." >&2; exit 1; }
+  [[ -n "$value" ]] || { echo "A value for $label is required; nothing was changed for it." >&2; exit 1; }
+
+  # Spaces, tabs or a carriage return at either end are almost always paste artifacts.
+  trimmed="${value#"${value%%[![:space:]]*}"}"
+  trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+  if [[ "$trimmed" != "$value" ]]; then
+    echo "    it starts or ends with whitespace: ${#value} characters, ${#trimmed} without it" >&2
+    read -r -p "    remove the whitespace? [Y/n] " answer </dev/tty
+    [[ "$answer" =~ ^[Nn] ]] || value="$trimmed"
+  fi
+  [[ -n "$value" ]] || { echo "A value for $label is required; nothing was changed for it." >&2; exit 1; }
+
+  echo "    received ${#value} characters" >&2
   printf '%s' "$value"
 }
 
 # Sets a secret if it is missing (or explicitly selected with --update).
 ensure() {
-  local vault="$1" name="$2" env_name="$3" label="$4"
-  if exists "$vault" "$name" && [[ "$update" != "$name" ]]; then
+  local vault="$1" name="$2" env_name="$3" label="$4" value
+  if exists "$vault" "$name" && ! selected_for_update "$name"; then
     echo "  keep $vault/$name"
     return
   fi
-  put "$vault" "$name" "$(value_for "$env_name" "$label")"
+
+  # Assigned on its own line so that a failed prompt stops the script instead of storing an empty secret.
+  value="$(value_for "$env_name" "$label")"
+  put "$vault" "$name" "$value"
 }
 
 random_key() { head -c 32 /dev/urandom | base64 | tr -d '\n'; }
@@ -165,4 +211,11 @@ ensure "$worker_vault" "Archive--SecretAccessKey" WASABI_SECRET_ACCESS_KEY "Wasa
 ensure "$worker_vault" "Gemini--ApiKey" GEMINI_API_KEY "Gemini API key"
 ensure "$worker_vault" "Temporal--ApiKey" TEMPORAL_API_KEY_WORKER "Temporal API key (worker service account)"
 
-echo "Done. Restart both Container Apps so they reload their secrets."
+cat <<EOF
+Done. The apps read their secrets at startup: restart both so they use the new values
+(docs/operations.md, "Restarting the apps"):
+  for app in ca-photo-web ca-photo-worker; do
+    az containerapp revision restart -g rg-photo-prod -n \$app \\
+      --revision \$(az containerapp show -g rg-photo-prod -n \$app --query properties.latestRevisionName -o tsv)
+  done
+EOF

@@ -225,7 +225,9 @@ scripts/bootstrap-keyvault.sh \
 
 It asks, with hidden input, for: the archive password, the Wasabi access key id and secret, the Gemini API key,
 the two Temporal service-account API keys (worker, web) and the GitHub OAuth app's client id and secret.
-(Each can instead come from an environment variable; see `scripts/bootstrap-keyvault.sh --help`.) It generates
+(Each can instead come from an environment variable; see `scripts/bootstrap-keyvault.sh --help`.) After each
+value it prints `received N characters` (input stays hidden), and offers to remove whitespace that pasting can
+add at either end. To replace a value later, see [operations.md](operations.md#re-entering-secrets). It generates
 the web key, the Temporal payload key and the Data Protection key itself and stores them in the right vaults.
 Values are never printed. Running it again only fills in what is missing.
 

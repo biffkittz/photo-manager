@@ -14,6 +14,34 @@ for app in ca-photo-web ca-photo-worker; do
 done
 ```
 
+## Re-entering secrets
+
+The vaults accept only the apps' private endpoints, so let your machine in, change the secrets, restart, and
+close them again:
+
+1. In `infra/environments/prod/terraform.tfvars` set `admin_ip_ranges = ["<your public IP>/32"]`
+   (`curl -s https://api.ipify.org`) and `key_vault_admin_object_ids = ["<az ad signed-in-user show --query id -o tsv>"]`,
+   export `CLOUDFLARE_API_TOKEN` and `TF_VAR_temporal_api_key` as in deployment step 4, and apply:
+   `terraform -chdir=infra/environments/prod apply`. The plan should only open the two vaults' firewalls and add
+   your two role assignments per vault. Wait a few minutes for the role assignments to take effect (the script
+   says so if they have not yet).
+2. Run the script with every secret you want to replace (each `--update` once; `--update all` asks for all of
+   them; anything not named is kept):
+
+   ```bash
+   scripts/bootstrap-keyvault.sh \
+     --web-vault "$(terraform -chdir=infra/environments/prod output -json key_vaults | jq -r .web)" \
+     --worker-vault "$(terraform -chdir=infra/environments/prod output -json key_vaults | jq -r .worker)" \
+     --update Auth--GitHubClientId --update Auth--GitHubClientSecret
+   ```
+
+   Input is hidden. After each value the script prints `received N characters`, so you can tell a paste
+   arrived (a GitHub client secret is 40 characters, a client id 20); if the value starts or ends with
+   whitespace, which pasting can add, it asks before removing it. An empty entry is asked for again, and
+   nothing is stored for a secret that never got a value.
+3. Restart both apps ([above](#restarting-the-apps-after-changing-secrets)); the script prints the command.
+4. Close the vaults: set both settings back to `[]` and apply again (they must match `TF_VARS_PROD`).
+
 ## Rotating keys
 
 | Secret | How | Cadence |
@@ -115,8 +143,11 @@ callback accepts at most 30 requests a minute per IP address.
   Typical reasons: `redirect_uri_mismatch` (the production OAuth app's callback must be exactly
   `https://photo.biffkittz.com/signin-github`), `incorrect_client_credentials` (the client id or secret in the
   web vault is not the production OAuth app's: update them with `scripts/bootstrap-keyvault.sh --update
-  Auth--GitHubClientSecret`, then restart the web app), `access_denied` (cancelled on GitHub), or an expired or
-  invalid `oauth state` (the sign-in took more than 15 minutes, or cookies were blocked).
+  Auth--GitHubClientSecret`, then restart the web app), `access_denied` (cancelled on GitHub), an expired or
+  invalid `oauth state` (the sign-in took more than 15 minutes), or `Correlation failed` with
+  `'__Host-pm-correlation…' cookie not found` (the browser did not send back the cookie set when the sign-in
+  started: cookies blocked for the site, or the sign-in started on a different host name than
+  `photo.biffkittz.com`; releases before 2026-11-20 also had a cookie path bug that caused it every time).
 
 ## Container registry storage
 

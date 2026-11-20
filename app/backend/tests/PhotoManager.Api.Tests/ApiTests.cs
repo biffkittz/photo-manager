@@ -453,6 +453,27 @@ public sealed class ApiTests(ApiFactory factory)
     }
 
     [Fact]
+    public async Task Sign_in_cookies_meet_the_browser_rules_for_host_prefixed_cookies()
+    {
+        // Browsers silently discard a __Host- cookie unless it is Secure, has Path=/ and no Domain. The correlation
+        // cookie used to get Path=/signin-github, so production sign-ins failed with "Correlation failed".
+        var client = factory.ClientFor(null);
+        using var response = await client.GetAsync("/api/auth/login?returnUrl=%2Fgallery", Ct);
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.StartsWith("https://github.com/login/oauth/authorize", response.Headers.Location?.AbsoluteUri, StringComparison.Ordinal);
+        var cookies = response.Headers.GetValues("Set-Cookie").ToList();
+        Assert.Contains(cookies, c => c.StartsWith("__Host-pm-correlation", StringComparison.Ordinal));
+        Assert.All(cookies.Where(c => c.StartsWith("__Host-", StringComparison.Ordinal)), cookie =>
+        {
+            var attributes = cookie.Split(';').Skip(1).Select(a => a.Trim()).ToList();
+            Assert.Contains("path=/", attributes, StringComparer.OrdinalIgnoreCase);
+            Assert.Contains("secure", attributes, StringComparer.OrdinalIgnoreCase);
+            Assert.DoesNotContain(attributes, a => a.StartsWith("domain=", StringComparison.OrdinalIgnoreCase));
+        });
+    }
+
+    [Fact]
     public async Task OAuth_callback_failures_are_reported_as_failed_and_rate_limited()
     {
         // One test, because the callback's per-IP limit is shared by every request in this test host.
