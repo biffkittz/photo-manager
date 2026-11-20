@@ -65,6 +65,15 @@ jobs:
         env:
           TFVARS: ${{ vars.TF_VARS_PROD }}
         run: printf '%s\n' "$TFVARS" > terraform.tfvars
+      - name: Check GitHub configuration
+        env:
+          AZURE_CLIENT_ID_PLAN: ${{ vars.AZURE_CLIENT_ID_PLAN }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          TF_VARS_PROD: ${{ vars.TF_VARS_PROD }}
+          CLOUDFLARE_API_TOKEN_READONLY: ${{ secrets.CLOUDFLARE_API_TOKEN_READONLY }}
+          TEMPORAL_CLOUD_API_KEY_READONLY: ${{ secrets.TEMPORAL_CLOUD_API_KEY_READONLY }}
+        run: '"$GITHUB_WORKSPACE/.github/scripts/require-config.sh" AZURE_CLIENT_ID_PLAN AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID TF_VARS_PROD CLOUDFLARE_API_TOKEN_READONLY TEMPORAL_CLOUD_API_KEY_READONLY'
       # The backend (existing state storage, Entra ID auth) is configured in versions.tf.
       - run: terraform init -input=false
       # -lock=false: the plan identity can only read the state, so code under review can never modify it.
@@ -102,6 +111,15 @@ jobs:
         env:
           TFVARS: ${{ vars.TF_VARS_PROD }}
         run: printf '%s\n' "$TFVARS" > terraform.tfvars
+      - name: Check GitHub configuration
+        env:
+          AZURE_CLIENT_ID_PLAN: ${{ vars.AZURE_CLIENT_ID_PLAN }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          TF_VARS_PROD: ${{ vars.TF_VARS_PROD }}
+          CLOUDFLARE_API_TOKEN_READONLY: ${{ secrets.CLOUDFLARE_API_TOKEN_READONLY }}
+          TEMPORAL_CLOUD_API_KEY_READONLY: ${{ secrets.TEMPORAL_CLOUD_API_KEY_READONLY }}
+        run: '"$GITHUB_WORKSPACE/.github/scripts/require-config.sh" AZURE_CLIENT_ID_PLAN AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID TF_VARS_PROD CLOUDFLARE_API_TOKEN_READONLY TEMPORAL_CLOUD_API_KEY_READONLY'
       - run: terraform init -input=false
       - run: terraform plan -input=false -lock=false -no-color -out=tfplan
       - name: Plan to review before approving the apply
@@ -138,6 +156,15 @@ jobs:
         env:
           TFVARS: ${{ vars.TF_VARS_PROD }}
         run: printf '%s\n' "$TFVARS" > terraform.tfvars
+      - name: Check GitHub configuration
+        env:
+          AZURE_CLIENT_ID_DEPLOY: ${{ vars.AZURE_CLIENT_ID_DEPLOY }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          TF_VARS_PROD: ${{ vars.TF_VARS_PROD }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          TEMPORAL_CLOUD_API_KEY: ${{ secrets.TEMPORAL_CLOUD_API_KEY }}
+        run: '"$GITHUB_WORKSPACE/.github/scripts/require-config.sh" AZURE_CLIENT_ID_DEPLOY AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID TF_VARS_PROD CLOUDFLARE_API_TOKEN TEMPORAL_CLOUD_API_KEY'
       - run: terraform init -input=false
       - run: terraform plan -input=false -lock-timeout=5m -no-color -out=tfplan
       - name: Apply only what was reviewed
