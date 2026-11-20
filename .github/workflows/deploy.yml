@@ -1,0 +1,153 @@
+# Continuous delivery: after CI passes on main, build release images (with the ImageSharp license from a
+# BuildKit secret), push them to ACR, run database migrations as a Container Apps Job, roll out the worker
+# then the web app, and smoke-test the site. Runs in the protected "production" environment.
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      images_only:
+        description: "Only build and push images (first deployment, before terraform apply creates the apps)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Deploy only after a successful CI run for a push to main (never for pull-request runs, including forks).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: production
+    env:
+      ACR: ${{ vars.ACR_LOGIN_SERVER }}
+      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+      - id: tag
+        run: echo "tag=sha-${COMMIT::12}" >> "$GITHUB_OUTPUT"
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID_DEPLOY }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - run: az acr login --name "${ACR%%.*}"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # The license (a multi-line file) is handed to BuildKit as a secret file; it never enters an image layer.
+      - name: Write ImageSharp license
+        env:
+          SIXLABORS_LICENSE: ${{ secrets.SIXLABORS_LICENSE }}
+        run: |
+          umask 077
+          printf '%s' "$SIXLABORS_LICENSE" > "$RUNNER_TEMP/sixlabors.lic"
+      - name: Build + push web
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: web
+          push: true
+          tags: ${{ env.ACR }}/photo-web:${{ steps.tag.outputs.tag }}
+          secret-files: sixlabors_license_key=${{ runner.temp }}/sixlabors.lic
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=web
+      - name: Build + push worker
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: worker
+          push: true
+          tags: ${{ env.ACR }}/photo-worker:${{ steps.tag.outputs.tag }}
+          secret-files: sixlabors_license_key=${{ runner.temp }}/sixlabors.lic
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=worker
+      - name: Build + push migrator
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: migrator
+          push: true
+          tags: ${{ env.ACR }}/photo-migrator:${{ steps.tag.outputs.tag }}
+          secret-files: sixlabors_license_key=${{ runner.temp }}/sixlabors.lic
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=migrator
+
+      - name: Migrate database (Container Apps Job inside the VNet)
+        if: ${{ !inputs.images_only }}
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          az containerapp job update -n caj-photo-migrate -g "$RESOURCE_GROUP" --image "$ACR/photo-migrator:$TAG" --output none
+          execution=$(az containerapp job start -n caj-photo-migrate -g "$RESOURCE_GROUP" --query name -o tsv)
+          for _ in $(seq 1 90); do
+            status=$(az containerapp job execution show -n caj-photo-migrate -g "$RESOURCE_GROUP" --job-execution-name "$execution" --query properties.status -o tsv)
+            echo "migration $execution: $status"
+            [[ "$status" == "Succeeded" ]] && exit 0
+            [[ "$status" == "Failed" || "$status" == "Stopped" ]] && exit 1
+            sleep 10
+          done
+          echo "migration timed out" && exit 1
+
+      - name: Roll out worker, then web (each must become healthy)
+        if: ${{ !inputs.images_only }}
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          # Container Apps keeps the previous revision serving while a new one starts, so a successful update
+          # call (or a healthy site) does not prove the release works: wait for the new revision itself.
+          wait_for_revision() {
+            local app="$1" image="$2" revision state health current
+            for _ in $(seq 1 60); do
+              revision=$(az containerapp show -n "$app" -g "$RESOURCE_GROUP" --query properties.latestRevisionName -o tsv)
+              read -r state health current <<< "$(az containerapp revision show -n "$app" -g "$RESOURCE_GROUP" --revision "$revision" \
+                --query "[properties.runningState, properties.healthState, properties.template.containers[0].image]" -o tsv | tr '\n' ' ')"
+              echo "$app $revision: $state / $health ($current)"
+              if [[ "$current" == "$image" && ( "$state" == "Running" || "$state" == "RunningAtMaxScale" ) && "$health" == "Healthy" ]]; then
+                return 0
+              fi
+              if [[ "$current" == "$image" && ( "$state" == "Failed" || "$state" == "Degraded" ) ]]; then
+                echo "::error::$app revision $revision failed to start"
+                return 1
+              fi
+              sleep 10
+            done
+            echo "::error::$app revision did not become healthy in time"
+            return 1
+          }
+
+          az containerapp update -n ca-photo-worker -g "$RESOURCE_GROUP" --image "$ACR/photo-worker:$TAG" --output none
+          wait_for_revision ca-photo-worker "$ACR/photo-worker:$TAG"
+          az containerapp update -n ca-photo-web -g "$RESOURCE_GROUP" --image "$ACR/photo-web:$TAG" --output none
+          wait_for_revision ca-photo-web "$ACR/photo-web:$TAG"
+
+      - name: Smoke test
+        if: ${{ !inputs.images_only }}
+        env:
+          SITE: ${{ vars.SITE_HOSTNAME }}
+        run: |
+          for _ in $(seq 1 30); do
+            if curl -fsS "https://$SITE/healthz" >/dev/null && curl -fsS "https://$SITE/readyz" >/dev/null; then
+              echo "healthy"; exit 0
+            fi
+            sleep 10
+          done
+          echo "site did not become healthy" && exit 1

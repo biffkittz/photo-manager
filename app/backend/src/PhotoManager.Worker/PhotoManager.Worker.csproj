@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <!--
+    Temporal worker host (no public ingress). Uses the Web SDK only to expose /healthz and /readyz
+    for Azure Container Apps probes. This is the only tier that holds the archive password.
+  -->
+  <PropertyGroup>
+    <RootNamespace>PhotoManager.Worker</RootNamespace>
+    <UserSecretsId>photo-manager-worker-2d7a9e41</UserSecretsId>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Temporalio.Extensions.Hosting" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\PhotoManager.Core\PhotoManager.Core.csproj" />
+    <ProjectReference Include="..\PhotoManager.Data\PhotoManager.Data.csproj" />
+    <ProjectReference Include="..\PhotoManager.Infrastructure\PhotoManager.Infrastructure.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="PhotoManager.Worker.Tests" />
+  </ItemGroup>
+</Project>

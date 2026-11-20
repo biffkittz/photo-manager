@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- One-shot console app run as an Azure Container Apps Job: applies EF migrations and DB grants. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>PhotoManager.Migrator</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Update="appsettings*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\PhotoManager.Data\PhotoManager.Data.csproj" />
+    <ProjectReference Include="..\PhotoManager.Infrastructure\PhotoManager.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

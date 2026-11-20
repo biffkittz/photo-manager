@@ -1,0 +1,51 @@
+{
+  // Multi-root workspace: open with "File > Open Workspace from File..." (from a WSL window).
+  // Launch configurations and tasks live in .vscode/ of the repository root (first folder below).
+  "folders": [
+    { "name": "photo-manager", "path": "." },
+    { "name": "backend (.NET 11)", "path": "app/backend" },
+    { "name": "frontend (Vue 3)", "path": "app/frontend" },
+    { "name": "infra (Terraform)", "path": "infra" }
+  ],
+  "settings": {
+    "dotnet.defaultSolution": "app/backend/PhotoManager.slnx",
+    "files.exclude": {
+      "**/bin": true,
+      "**/obj": true,
+      "**/node_modules": true,
+      "**/.terraform": true
+    },
+    "search.exclude": {
+      "**/dist": true,
+      "**/out": true,
+      "**/playwright-report": true,
+      "**/test-results": true,
+      "**/*.lock.json": true
+    }
+  },
+  "extensions": {
+    "recommendations": [
+      "ms-vscode-remote.remote-wsl",
+      "ms-dotnettools.csdevkit",
+      "ms-dotnettools.csharp",
+      "Vue.volar",
+      "dbaeumer.vscode-eslint",
+      "esbenp.prettier-vscode",
+      "oxc.oxc-vscode",
+      "bradlc.vscode-tailwindcss",
+      "vitest.explorer",
+      "ms-playwright.playwright",
+      "hashicorp.terraform",
+      "ms-azuretools.vscode-containers",
+      "ms-azuretools.vscode-azurecontainerapps",
+      "github.vscode-github-actions",
+      "ms-ossdata.vscode-pgsql",
+      "EditorConfig.EditorConfig",
+      "redhat.vscode-yaml",
+      "bierner.markdown-mermaid",
+      "DavidAnson.vscode-markdownlint",
+      "streetsidesoftware.code-spell-checker",
+      "ms-vscode.powershell"
+    ]
+  }
+}

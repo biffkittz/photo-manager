@@ -1,0 +1,61 @@
+{
+  // Start dependencies first ("Tasks: Run Task" > "deps: up"), or use the "Full stack" compound.
+  // The API listens on :5081; the Vite dev server on :5080 proxies /api and /signin-github to it, so
+  // http://localhost:5080 is the single local origin (one GitHub OAuth app works for every local mode).
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "API (:5081)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build: backend",
+      "program": "${workspaceFolder}/app/backend/src/PhotoManager.Api/bin/Debug/net11.0/PhotoManager.Api.dll",
+      "cwd": "${workspaceFolder}/app/backend/src/PhotoManager.Api",
+      "env": { "ASPNETCORE_ENVIRONMENT": "Development", "ASPNETCORE_URLS": "http://localhost:5081" },
+      "console": "internalConsole",
+      "stopAtEntry": false
+    },
+    {
+      "name": "Worker (:8081 health)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build: backend",
+      "program": "${workspaceFolder}/app/backend/src/PhotoManager.Worker/bin/Debug/net11.0/PhotoManager.Worker.dll",
+      "cwd": "${workspaceFolder}/app/backend/src/PhotoManager.Worker",
+      "env": { "ASPNETCORE_ENVIRONMENT": "Development", "ASPNETCORE_URLS": "http://localhost:8081" },
+      "console": "internalConsole"
+    },
+    {
+      "name": "Migrator (apply migrations)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build: backend",
+      "program": "${workspaceFolder}/app/backend/src/PhotoManager.Migrator/bin/Debug/net11.0/PhotoManager.Migrator.dll",
+      "cwd": "${workspaceFolder}/app/backend/src/PhotoManager.Migrator",
+      "env": { "DOTNET_ENVIRONMENT": "Development" },
+      "console": "internalConsole"
+    },
+    {
+      "name": "Frontend (Vite :5080)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev",
+      "cwd": "${workspaceFolder}/app/frontend"
+    },
+    {
+      "name": "Browser (debug the SPA)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5080",
+      "webRoot": "${workspaceFolder}/app/frontend/src"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Full stack (deps + API + worker + Vite)",
+      "preLaunchTask": "deps: up",
+      "configurations": ["API (:5081)", "Worker (:8081 health)", "Frontend (Vite :5080)"],
+      "stopAll": true
+    }
+  ]
+}

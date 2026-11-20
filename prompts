@@ -1,8 +1,10 @@
-Your goal is to build an easily deployable containerized web app (Vue 3 frontend and .net core backend) that integrates with Wasabi storage and Temporal workers to manage photos. One app view should allow the user to view and download existing photos from the bucket in the browser. Another page should manage bulk photo uploads (which will create work for the Temporal workers). When images are uploaded from the app, some image-processing LLM integration should read the image before encryption and assign a description to the photo (e.g. woman and boy smiling on the beach). The LLM calls and encryption work all happen on Temporal workers.
+Your goal is to build an easily deployable containerized web app (Vue 3 frontend and .net core backend) that integrates with Wasabi storage and Temporal workers to manage photos. One app view should allow the user to view and download existing photos from the bucket in the browser. Another page should manage bulk photo uploads and potentially other actions (which will create work for the Temporal workers). When images are uploaded from the app, an image-processing LLM integration using Gemini should read the image before encryption and assign a description to the photo based on its content (e.g. `woman and boy smiling on the beach`). The LLM calls and encryption work all happen on Temporal workers.
 
 The web app will be available at `photo.biffkittz.com` (DNS hosted by Cloudflare) and should be deployed as an Azure Container App in centralus. The worker containers should be hosted in ACA as well. You should store secrets in Key Vault. The web app should integrate with GitHub for login.
 
 Infrastructure will be managed by Terraform.
+
+As always, please consult with me before making major architectural decisions.
 
 The Wasabi account and `photo-bk` bucket already exist -- the `photo-bk` bucket already contains thousands of files that have been encrypted with a password using the PowerShell Script `protect.ps1` in this directory (the app will need to encrypt and decrypt photos throughout, as all photos are stored encrypted in Wasabi). The app will use Temporal workers (.NET 11) to perform encryption/decryption of photo files.
 
@@ -443,3 +445,5 @@ In designing the Temporal architecture and workers, please follow documented bes
 You should develop a sensible CI/CD strategy for this project. This project repo will exist in GitHub, and GitHub will be used for CI/CD.
 
 The app will use the Temporal namespace `photo.joqqs`, hosted in Temporal Cloud
+
+After you have written v1 of this app, please have Gemini review all of your work for correctness and security. You will report back with any action items the review produces.

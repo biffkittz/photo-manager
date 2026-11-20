@@ -1,0 +1,88 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens as CSS custom properties (theming), exposed to Tailwind as color utilities
+ * (bg-surface, text-muted, ...). Light and dark themes follow the OS preference.
+ * Colour pairs meet WCAG AA contrast (4.5:1 for text).
+ */
+:root {
+  --pm-bg: #f8fafc;
+  --pm-surface: #ffffff;
+  --pm-surface-muted: #f1f5f9;
+  --pm-border: #cbd5e1;
+  --pm-text: #0f172a;
+  --pm-text-muted: #475569;
+  --pm-brand: #1d4ed8;
+  --pm-brand-hover: #1e40af;
+  --pm-on-brand: #ffffff;
+  --pm-danger: #b91c1c;
+  --pm-on-danger: #ffffff; /* 6.5:1 on danger */
+  --pm-success: #166534; /* 5.7:1 on its 15% tint (WCAG AA) */
+  --pm-warning: #854d0e; /* 5.5:1 on its 15% tint (WCAG AA) */
+  --pm-focus: #2563eb;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --pm-bg: #0b1120;
+    --pm-surface: #111827;
+    --pm-surface-muted: #1f2937;
+    --pm-border: #374151;
+    --pm-text: #f1f5f9;
+    --pm-text-muted: #cbd5e1;
+    --pm-brand: #60a5fa;
+    --pm-brand-hover: #93c5fd;
+    --pm-on-brand: #0b1120;
+    --pm-danger: #f87171;
+    --pm-on-danger: #0b1120; /* 6.5:1; white text on this red was only 2.9:1 */
+    --pm-success: #4ade80;
+    --pm-warning: #facc15;
+    --pm-focus: #93c5fd;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--pm-bg);
+  --color-surface: var(--pm-surface);
+  --color-surface-muted: var(--pm-surface-muted);
+  --color-border: var(--pm-border);
+  --color-text: var(--pm-text);
+  --color-muted: var(--pm-text-muted);
+  --color-brand: var(--pm-brand);
+  --color-brand-hover: var(--pm-brand-hover);
+  --color-on-brand: var(--pm-on-brand);
+  --color-danger: var(--pm-danger);
+  --color-on-danger: var(--pm-on-danger);
+  --color-success: var(--pm-success);
+  --color-warning: var(--pm-warning);
+  --color-focus: var(--pm-focus);
+}
+
+@layer base {
+  html {
+    background-color: var(--pm-bg);
+    color: var(--pm-text);
+    font-family:
+      ui-sans-serif,
+      system-ui,
+      -apple-system,
+      'Segoe UI',
+      Roboto,
+      sans-serif;
+  }
+
+  /* Visible keyboard focus everywhere (WCAG 2.4.7). */
+  :focus-visible {
+    outline: 3px solid var(--pm-focus);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

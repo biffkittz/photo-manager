@@ -1,0 +1,21 @@
+# Terraform working directories and state: state can contain sensitive values and lives in the
+# Azure Storage remote backend, never in git.
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfplan
+tfplan
+# Variable files usually hold environment-specific values; commit only the examples.
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+# Local overrides
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+# NOTE: .terraform.lock.hcl IS committed (provider checksums pin the supply chain).

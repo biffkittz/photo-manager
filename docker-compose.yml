@@ -1,0 +1,145 @@
+# Local development environment. NOT for production: every credential here is a throwaway value
+# that only works against these local containers. Ports bind to 127.0.0.1 so nothing is exposed on
+# your network.
+#
+#   docker compose up -d                 # dependencies only (run API/worker with dotnet run or VS Code)
+#   docker compose --profile app up -d   # also run the web + worker containers built from ./Dockerfile
+#
+# Services
+#   postgres  PostgreSQL 17, same major version as production    localhost:55432 (5432 is often taken by a host PostgreSQL)
+#   temporal  Temporal dev server + Web UI                       localhost:7233 / http://localhost:8233
+#   azurite   Azure Blob Storage emulator (staging/renditions)   localhost:10000
+#   s3        S3-compatible emulator standing in for Wasabi       localhost:9090 (bucket photo-bk-dev)
+name: photo-manager
+
+services:
+  postgres:
+    image: postgres:17-alpine@sha256:526f86d93c6ea08fd3f1fe5605650cacc781b2c6013169a0ad8f42c7d3d84f32
+    environment:
+      POSTGRES_DB: photomanager
+      POSTGRES_USER: photomanager
+      POSTGRES_PASSWORD: photomanager-dev
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - pgdata17:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U photomanager -d photomanager"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  temporal:
+    image: temporalio/temporal:1.10.1@sha256:b228dadf9cdb6c7c02a1394b89dd76f827aac9760e458fce42f0899a10141225
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--ui-ip", "0.0.0.0", "--log-level", "warn"]
+    ports:
+      - "127.0.0.1:7233:7233"
+      - "127.0.0.1:8233:8233"
+    # Health checks let `docker compose up --wait` return only once every dependency accepts requests.
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "127.0.0.1:7233"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:3.38.0@sha256:c26024d62bf4a5b88a40968afd217234c00e1fc9a4790dc6105d1ca7979f6eec
+    command: ["azurite-blob", "--blobHost", "0.0.0.0", "--blobPort", "10000", "--location", "/data", "--skipApiVersionCheck"]
+    ports:
+      - "127.0.0.1:10000:10000"
+    volumes:
+      - azurite:/data
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 10000"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  # Named volumes are created root-owned, but s3mock runs as UID 1000: fix ownership once before it starts.
+  s3-volume-init:
+    image: alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
+    command: ["chown", "-R", "1000:1000", "/data"]
+    volumes:
+      - s3data:/data
+
+  s3:
+    image: adobe/s3mock:5.2.3@sha256:ab01a6946750f451ca215a47e91030695b260e4003b8a5a6201d25029b8fca92
+    depends_on:
+      s3-volume-init:
+        condition: service_completed_successfully
+    environment:
+      COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: photo-bk-dev
+      COM_ADOBE_TESTING_S3MOCK_STORE_RETAIN_FILES_ON_EXIT: "true"
+      COM_ADOBE_TESTING_S3MOCK_STORE_ROOT: /data
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - s3data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9090/"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  # ---- Optional: the application containers (profile "app"). Secrets come from .env (see .env.example).
+  web:
+    profiles: ["app"]
+    build:
+      context: .
+      target: web
+      args:
+        BUILD_CONFIGURATION: ${BUILD_CONFIGURATION:-Debug}
+      secrets:
+        - sixlabors_license_key
+    environment: &app-environment
+      ASPNETCORE_ENVIRONMENT: Development
+      Database__ConnectionString: Host=postgres;Database=photomanager;Username=photomanager;Password=photomanager-dev
+      Temporal__Address: temporal:7233
+      Temporal__PayloadKey: ${TEMPORAL_PAYLOAD_KEY:-}
+      Crypto__WebKey: ${CRYPTO_WEB_KEY:-}
+      # Azurite's well-known development account key (public, documented by Microsoft; not a secret).
+      Blob__ConnectionString: DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;
+      Blob__CreateContainers: "true"
+      Auth__GitHubClientId: ${GITHUB_CLIENT_ID:-}
+      Auth__GitHubClientSecret: ${GITHUB_CLIENT_SECRET:-}
+      Auth__Users__0__GitHubId: ${GITHUB_USER_ID:-0}
+      Auth__Users__0__Role: Admin
+    ports:
+      - "127.0.0.1:5080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    profiles: ["app"]
+    build:
+      context: .
+      target: worker
+      args:
+        BUILD_CONFIGURATION: ${BUILD_CONFIGURATION:-Debug}
+      secrets:
+        - sixlabors_license_key
+    environment:
+      <<: *app-environment
+      Crypto__ArchivePassword: ${DEV_ARCHIVE_PASSWORD:-}
+      Archive__ServiceUrl: http://s3:9090
+      Archive__Region: us-east-1
+      Archive__BucketName: photo-bk-dev
+      Archive__AccessKeyId: local-dev
+      Archive__SecretAccessKey: local-dev
+      Archive__ForcePathStyle: "true"
+      Gemini__UseFake: ${GEMINI_USE_FAKE:-true}
+      Gemini__ApiKey: ${GEMINI_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+# Release image builds need the ImageSharp license: SIXLABORS_LICENSE_KEY="$(cat sixlabors.lic)" docker compose ...
+secrets:
+  sixlabors_license_key:
+    environment: SIXLABORS_LICENSE_KEY
+
+volumes:
+  pgdata17:
+  azurite:
+  s3data:

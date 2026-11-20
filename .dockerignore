@@ -1,0 +1,33 @@
+# Keep the build context small and free of secrets. Anything not needed by the Dockerfile is excluded.
+.git
+.github
+.vscode
+docs
+infra
+scripts
+**/node_modules
+**/dist
+**/bin
+**/obj
+**/TestResults
+**/playwright-report
+**/test-results
+**/coverage
+app/backend/tests
+
+# Secrets and local data must never enter an image or the build cache.
+scratch
+**/.env
+**/.env.*
+**/*.tfstate*
+**/*.tfvars
+**/sixlabors.lic
+**/*.pfx
+**/*.pem
+**/*.key
+**/appsettings.*.local.json
+photo.db
+photos
+outbox
+protect.ps1
+prompts

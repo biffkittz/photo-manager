@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- photo-crypt: offline tool to inspect/decrypt/encrypt archive files (legacy protect.ps1 and v2). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>PhotoManager.Cli</RootNamespace>
+    <AssemblyName>photo-crypt</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\PhotoManager.Core\PhotoManager.Core.csproj" />
+  </ItemGroup>
+</Project>

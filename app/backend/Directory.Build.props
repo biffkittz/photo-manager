@@ -1,0 +1,51 @@
+<Project>
+  <!--
+    Shared MSBuild settings for every backend project.
+    Security/quality posture: nullable + analyzers on, warnings are errors, NuGet vulnerability
+    audit on restore (a vulnerable package fails the build), and lock files for reproducible restores.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Chiseled runtime images ship without ICU; the app never needs culture-specific behaviour. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RestoreLockedMode Condition="'$(CI)' == 'true'">true</RestoreLockedMode>
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>low</NuGetAuditLevel>
+    <Company>photo-manager</Company>
+    <Product>Photo Manager</Product>
+    <Copyright>photo-manager contributors</Copyright>
+  </PropertyGroup>
+
+  <!--
+    ImageSharp 4 validates a Six Labors license at build time; Release builds fail without one (Debug
+    builds only warn). Supply the free community license as the SixLaborsLicenseKey environment variable or
+    as a gitignored sixlabors.lic in the repository root or in app/backend (the Docker build mounts it there
+    from a BuildKit secret). See docs/development.md#imagesharp-license.
+  -->
+  <PropertyGroup Condition="'$(SixLaborsLicenseKey)' == '' and Exists('$(MSBuildThisFileDirectory)sixlabors.lic')">
+    <SixLaborsLicenseFile>$(MSBuildThisFileDirectory)sixlabors.lic</SixLaborsLicenseFile>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(SixLaborsLicenseKey)' == '' and '$(SixLaborsLicenseFile)' == '' and Exists('$(MSBuildThisFileDirectory)../../sixlabors.lic')">
+    <SixLaborsLicenseFile>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../sixlabors.lic'))</SixLaborsLicenseFile>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(IsTestProject)' == 'true'">
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsTestProject)' == 'true'">
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>

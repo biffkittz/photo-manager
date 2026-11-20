@@ -1,0 +1,9 @@
+# gitleaks configuration (CI secret scanning, see .github/workflows/ci.yml).
+title = "photo-manager"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Azurite's well-known development account key: public, documented by Microsoft, only valid against the local emulator"
+regexes = ['''Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==''']

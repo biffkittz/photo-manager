@@ -1,0 +1,10 @@
+bin/
+obj/
+*.user
+*.suo
+TestResults/
+coverage/
+*.coverage
+*.trx
+# Six Labors license (supplied locally or via CI secret; never committed)
+sixlabors.lic

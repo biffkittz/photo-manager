@@ -1,0 +1,128 @@
+import type { ProblemDetails } from './types'
+
+/** An HTTP error from the API, carrying a user-safe message. */
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+    readonly problem?: ProblemDetails,
+  ) {
+    super(message)
+    this.name = 'ApiError'
+  }
+
+  /** True for 4xx responses, which retrying will not fix. */
+  get isClientError(): boolean {
+    return this.status >= 400 && this.status < 500
+  }
+}
+
+type CsrfTokenProvider = () => string | null
+type UnauthorizedHandler = () => void
+
+let csrfTokenProvider: CsrfTokenProvider = () => null
+let onUnauthorized: UnauthorizedHandler = () => {}
+
+/**
+ * Wires the HTTP layer to the auth store without a circular import: the store supplies the CSRF token
+ * (kept in memory only, never in localStorage) and reacts when the session has expired.
+ */
+export function configureHttp(options: {
+  csrfToken: CsrfTokenProvider
+  unauthorized: UnauthorizedHandler
+}) {
+  csrfTokenProvider = options.csrfToken
+  onUnauthorized = options.unauthorized
+}
+
+/** Returns the current CSRF token for callers that build requests themselves (XHR uploads). */
+export function currentCsrfToken(): string | null {
+  return csrfTokenProvider()
+}
+
+/** Reports an expired session from requests made outside apiFetch (XHR uploads, rendition polling). */
+export function notifyUnauthorized(): void {
+  onUnauthorized()
+}
+
+export interface RequestOptions {
+  method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
+  body?: unknown
+  signal?: AbortSignal
+}
+
+/**
+ * Same-origin JSON fetch. Cookies are sent automatically (credentials: 'same-origin'); the session cookie is
+ * HttpOnly, so scripts never see it. Mutating requests carry the anti-CSRF header.
+ */
+export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const method = options.method ?? 'GET'
+  const headers = new Headers({ Accept: 'application/json' })
+  if (options.body !== undefined) {
+    headers.set('Content-Type', 'application/json')
+  }
+
+  if (method !== 'GET') {
+    const token = csrfTokenProvider()
+    if (token) {
+      headers.set('X-CSRF-TOKEN', token)
+    }
+  }
+
+  const response = await fetch(path, {
+    method,
+    headers,
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    credentials: 'same-origin',
+    signal: options.signal,
+  })
+
+  if (response.status === 401) {
+    onUnauthorized()
+  }
+
+  if (!response.ok) {
+    throw await toApiError(response)
+  }
+
+  if (
+    response.status === 204 ||
+    (response.status === 202 && response.headers.get('Content-Length') === '0')
+  ) {
+    return undefined as T
+  }
+
+  const text = await response.text()
+  return (text ? JSON.parse(text) : undefined) as T
+}
+
+/** Converts an error response into an {@link ApiError} with the most helpful user-safe message available. */
+export async function toApiError(response: Response): Promise<ApiError> {
+  let problem: ProblemDetails | undefined
+  try {
+    problem = (await response.json()) as ProblemDetails
+  } catch {
+    problem = undefined
+  }
+
+  const validation = problem?.errors ? Object.values(problem.errors).flat().join(' ') : ''
+  const message = validation || problem?.title || defaultMessage(response.status)
+  return new ApiError(response.status, message, problem)
+}
+
+function defaultMessage(status: number): string {
+  switch (status) {
+    case 401:
+      return 'Your session has expired. Please sign in again.'
+    case 403:
+      return 'You do not have permission to do that.'
+    case 404:
+      return 'That item could not be found.'
+    case 429:
+      return 'Too many requests. Please wait a moment and try again.'
+    default:
+      return status >= 500
+        ? 'The server had a problem. Please try again.'
+        : 'The request could not be completed.'
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "recommendations": [
+    "ms-vscode-remote.remote-wsl",
+    "ms-dotnettools.csdevkit",
+    "ms-dotnettools.csharp",
+    "Vue.volar",
+    "dbaeumer.vscode-eslint",
+    "esbenp.prettier-vscode",
+    "oxc.oxc-vscode",
+    "bradlc.vscode-tailwindcss",
+    "vitest.explorer",
+    "ms-playwright.playwright",
+    "hashicorp.terraform",
+    "ms-azuretools.vscode-containers",
+    "ms-azuretools.vscode-azurecontainerapps",
+    "github.vscode-github-actions",
+    "ms-ossdata.vscode-pgsql",
+    "EditorConfig.EditorConfig",
+    "redhat.vscode-yaml",
+    "bierner.markdown-mermaid",
+    "DavidAnson.vscode-markdownlint",
+    "streetsidesoftware.code-spell-checker",
+    "ms-vscode.powershell"
+  ]
+}

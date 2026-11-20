@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    End-to-end tests against the local docker-compose stack (Temporal dev server, PostgreSQL, Azurite,
+    S3 emulator) with the real worker hosted in-process. Skipped unless PHOTOMANAGER_INTEGRATION=1.
+    See docs/development.md#integration-tests.
+  -->
+  <PropertyGroup>
+    <IsTestProject>true</IsTestProject>
+    <OutputType>Exe</OutputType>
+    <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
+    <RootNamespace>PhotoManager.IntegrationTests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
+    <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\PhotoManager.Worker\PhotoManager.Worker.csproj" />
+  </ItemGroup>
+</Project>

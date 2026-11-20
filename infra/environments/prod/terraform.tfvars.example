@@ -1,0 +1,13 @@
+# Copy to terraform.tfvars (gitignored). Nothing here is secret, but it is personal configuration.
+subscription_id = "00000000-0000-0000-0000-000000000000"
+image_tag       = "sha-0000000" # the first image pushed by the deploy workflow
+
+github_users = [
+  { id = 1234567, login = "biffkittz", role = "Admin" },
+]
+
+# Your public IP, only while setting secrets with scripts/bootstrap-keyvault.sh (curl -s https://api.ipify.org).
+admin_ip_ranges            = []
+key_vault_admin_object_ids = [] # az ad signed-in-user show --query id -o tsv
+
+temporal_namespace_region = "aws-us-east-1" # from the Temporal Cloud UI (namespace photo.joqqs)

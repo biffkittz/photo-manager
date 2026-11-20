@@ -1,0 +1,89 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "deps: up",
+      "type": "shell",
+      "command": "docker compose up -d --wait postgres temporal azurite s3",
+      "problemMatcher": []
+    },
+    {
+      "label": "deps: down",
+      "type": "shell",
+      "command": "docker compose down",
+      "problemMatcher": []
+    },
+    {
+      "label": "dev secrets",
+      "type": "shell",
+      "command": "./scripts/dev-secrets.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "build: backend",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["build", "${workspaceFolder}/app/backend/PhotoManager.slnx", "-nologo"],
+      "problemMatcher": "$msCompile",
+      "group": { "kind": "build", "isDefault": true }
+    },
+    {
+      "label": "test: backend (unit + API)",
+      "type": "shell",
+      "command": "dotnet test --project tests/PhotoManager.Core.Tests && dotnet test --project tests/PhotoManager.Worker.Tests && dotnet test --project tests/PhotoManager.Api.Tests",
+      "options": { "cwd": "${workspaceFolder}/app/backend" },
+      "problemMatcher": "$msCompile",
+      "group": "test"
+    },
+    {
+      "label": "test: integration (needs deps + dev secrets)",
+      "type": "shell",
+      "command": "PHOTOMANAGER_INTEGRATION=1 dotnet test --project tests/PhotoManager.IntegrationTests",
+      "options": { "cwd": "${workspaceFolder}/app/backend" },
+      "problemMatcher": "$msCompile",
+      "group": "test"
+    },
+    {
+      "label": "db: add migration",
+      "type": "shell",
+      "command": "dotnet ef migrations add ${input:migrationName} --project src/PhotoManager.Data --startup-project src/PhotoManager.Data --output-dir Migrations",
+      "options": { "cwd": "${workspaceFolder}/app/backend" },
+      "problemMatcher": []
+    },
+    {
+      "label": "frontend: lint + types + unit",
+      "type": "shell",
+      "command": "npm run lint:ci && npm run type-check && npm run test:unit:ci",
+      "options": { "cwd": "${workspaceFolder}/app/frontend" },
+      "problemMatcher": [],
+      "group": "test"
+    },
+    {
+      "label": "frontend: e2e",
+      "type": "shell",
+      "command": "npm run test:e2e",
+      "options": { "cwd": "${workspaceFolder}/app/frontend" },
+      "problemMatcher": [],
+      "group": "test"
+    },
+    {
+      "label": "site: build and run (production packaging)",
+      "type": "shell",
+      "command": "./buildAndRunSite.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "terraform: fmt + validate",
+      "type": "shell",
+      "command": "terraform fmt -recursive infra && for d in infra/bootstrap infra/environments/prod; do terraform -chdir=$d init -backend=false -input=false >/dev/null && terraform -chdir=$d validate; done",
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "migrationName",
+      "type": "promptString",
+      "description": "Migration name (PascalCase)"
+    }
+  ]
+}

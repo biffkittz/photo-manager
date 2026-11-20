@@ -1,0 +1,21 @@
+# terraform-docs configuration: regenerate every README with
+#   docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/infra:/infra" quay.io/terraform-docs/terraform-docs:0.20.0 \
+#     --config /infra/.terraform-docs.yml /infra/<directory>
+formatter: markdown table
+output:
+  file: README.md
+  mode: inject
+sort:
+  enabled: true
+  by: required
+settings:
+  anchor: false
+  default: true
+  escape: true
+  hide-empty: true
+  html: false
+  indent: 2
+  lockfile: false
+  required: true
+  sensitive: true
+  type: true

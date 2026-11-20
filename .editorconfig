@@ -1,0 +1,162 @@
+# EditorConfig for the photo-manager repository.
+# Shared formatting rules for every editor/IDE (VS Code honours this via the EditorConfig extension
+# and the C# Dev Kit). C# analyzer severities live here too so `dotnet build` and the IDE agree.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.md]
+# Markdown uses two trailing spaces for hard line breaks; we never rely on that, so trimming is safe.
+trim_trailing_whitespace = true
+
+[*.{cs,csx}]
+indent_size = 4
+
+[*.{csproj,props,targets,slnx,xml,config}]
+indent_size = 2
+
+[*.{ps1,psm1}]
+indent_size = 4
+end_of_line = crlf
+
+[Makefile]
+indent_style = tab
+
+###############################################################################
+# C# code style
+###############################################################################
+[*.cs]
+# Namespaces and usings
+csharp_style_namespace_declarations = file_scoped:error
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = false
+csharp_using_directive_placement = outside_namespace:warning
+
+# var usage: use var when the type is apparent, explicit types elsewhere
+csharp_style_var_for_built_in_types = false:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_var_elsewhere = false:silent
+
+# Braces on new lines (Allman), always use braces
+csharp_new_line_before_open_brace = all
+csharp_new_line_before_else = true
+csharp_new_line_before_catch = true
+csharp_new_line_before_finally = true
+csharp_prefer_braces = true:warning
+
+# Expression-bodied members for simple one-liners
+csharp_style_expression_bodied_methods = when_on_single_line:silent
+csharp_style_expression_bodied_properties = true:suggestion
+csharp_style_expression_bodied_accessors = true:suggestion
+csharp_style_expression_bodied_constructors = false:silent
+
+# Modern language features
+csharp_style_prefer_primary_constructors = true:suggestion
+csharp_style_prefer_collection_expression = when_types_loosely_match:suggestion
+csharp_style_pattern_matching_over_is_with_cast_check = true:suggestion
+csharp_style_prefer_switch_expression = true:suggestion
+csharp_style_throw_expression = true:suggestion
+csharp_style_conditional_delegate_call = true:suggestion
+dotnet_style_null_propagation = true:suggestion
+dotnet_style_coalesce_expression = true:suggestion
+dotnet_style_prefer_is_null_check_over_reference_equality_method = true:suggestion
+
+# Explicit accessibility modifiers everywhere (C# guideline: "Explicitly declare access modifiers")
+dotnet_style_require_accessibility_modifiers = for_non_interface_members:error
+dotnet_style_readonly_field = true:warning
+csharp_preferred_modifier_order = public,private,protected,internal,file,static,extern,new,virtual,abstract,sealed,override,readonly,unsafe,required,volatile,async:suggestion
+
+# Naming: private fields _camelCase, constants PascalCase, interfaces I-prefixed
+dotnet_naming_rule.private_fields_underscore.symbols = private_fields
+dotnet_naming_rule.private_fields_underscore.style = underscore_camel
+dotnet_naming_rule.private_fields_underscore.severity = warning
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+dotnet_naming_style.underscore_camel.capitalization = camel_case
+dotnet_naming_style.underscore_camel.required_prefix = _
+
+dotnet_naming_rule.constants_pascal.symbols = constant_fields
+dotnet_naming_rule.constants_pascal.style = pascal
+dotnet_naming_rule.constants_pascal.severity = warning
+dotnet_naming_symbols.constant_fields.applicable_kinds = field
+dotnet_naming_symbols.constant_fields.required_modifiers = const
+dotnet_naming_style.pascal.capitalization = pascal_case
+
+dotnet_naming_rule.interfaces_i.symbols = interfaces
+dotnet_naming_rule.interfaces_i.style = i_prefix
+dotnet_naming_rule.interfaces_i.severity = warning
+dotnet_naming_symbols.interfaces.applicable_kinds = interface
+dotnet_naming_style.i_prefix.capitalization = pascal_case
+dotnet_naming_style.i_prefix.required_prefix = I
+
+###############################################################################
+# Analyzer tuning. AnalysisLevel=latest-recommended is enabled in Directory.Build.props and
+# warnings are errors. Each relaxation below is deliberate and explains why.
+###############################################################################
+# IDE0005 (unnecessary using) must be a warning so EnforceCodeStyleInBuild removes dead usings.
+dotnet_diagnostic.IDE0005.severity = warning
+# CA1848/CA1873 (LoggerMessage delegates): we use the [LoggerMessage] source generator on hot paths,
+# but requiring it for every one-off log line hurts readability more than it helps performance.
+dotnet_diagnostic.CA1848.severity = suggestion
+dotnet_diagnostic.CA1873.severity = suggestion
+# CA1515 (make public types internal in apps): public types in app assemblies are needed for
+# WebApplicationFactory tests and Temporal's reflection-based registration.
+dotnet_diagnostic.CA1515.severity = none
+# CA1812 (internal class never instantiated): false positives for DI/reflection-created types.
+dotnet_diagnostic.CA1812.severity = none
+# CA1303 (localize literals): the app is English-only by design.
+dotnet_diagnostic.CA1303.severity = none
+# CA2007 (ConfigureAwait) is enabled only for library projects below. Never in Temporal workflow code:
+# workflows must stay on Temporal's deterministic task scheduler.
+dotnet_diagnostic.CA2007.severity = none
+# CA1711/CA1716 naming heuristics conflict with domain names such as "PhotoStream"/"Shared".
+dotnet_diagnostic.CA1711.severity = suggestion
+dotnet_diagnostic.CA1716.severity = suggestion
+# CA1819/CA2227 (array/collection properties): EF Core entities and JSON DTOs legitimately need them.
+dotnet_diagnostic.CA1819.severity = suggestion
+dotnet_diagnostic.CA2227.severity = suggestion
+# CA1056/CA1054/CA1055 (URI typed members): config/DTO strings are validated where they are consumed.
+dotnet_diagnostic.CA1054.severity = suggestion
+dotnet_diagnostic.CA1055.severity = suggestion
+dotnet_diagnostic.CA1056.severity = suggestion
+# CA1062 (validate public args) is enforced by nullable reference types + ArgumentNullException.ThrowIfNull.
+dotnet_diagnostic.CA1062.severity = suggestion
+# CA1031 (catch general exception) stays a warning; the few intentional catch-alls are annotated inline.
+
+# Library projects: ConfigureAwait(false) required (C# guideline: "Use ConfigureAwait(false) in library code").
+[app/backend/src/{PhotoManager.Core,PhotoManager.Data,PhotoManager.Infrastructure}/**.cs]
+dotnet_diagnostic.CA2007.severity = warning
+
+# EF Core migrations are generated code.
+[app/backend/src/PhotoManager.Data/Migrations/**.cs]
+generated_code = true
+dotnet_diagnostic.CS1591.severity = none
+dotnet_diagnostic.IDE0005.severity = none
+
+# Tests: underscores in test names are idiomatic, XML docs are not required, and CA2007 is irrelevant.
+[app/backend/tests/**.cs]
+dotnet_diagnostic.CA1707.severity = none
+dotnet_diagnostic.CS1591.severity = none
+dotnet_diagnostic.CA2007.severity = none
+dotnet_diagnostic.CA1861.severity = none
+dotnet_diagnostic.CA5394.severity = none
+# Test fakes register instance methods as Temporal activities even when they use no instance state.
+dotnet_diagnostic.CA1822.severity = none
+
+###############################################################################
+# Frontend / config files
+###############################################################################
+[*.{ts,tsx,js,mjs,cjs,vue,json,jsonc,css,scss,html,yml,yaml}]
+indent_size = 2
+
+[*.{tf,tfvars,hcl}]
+indent_size = 2
+
+[*.sh]
+indent_size = 2
