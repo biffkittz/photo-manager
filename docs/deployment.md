@@ -7,11 +7,37 @@ Infrastructure is Terraform (`infra/`); application releases are GitHub Actions 
 Secrets are never in Terraform or GitHub variables: they go into Key Vault with `scripts/bootstrap-keyvault.sh`.
 Run every command below from the **repository root** unless a step says otherwise.
 
+## Overview
+
+| Step | Where | What |
+|---|---|---|
+| 0. Before you start | Workstation, accounts | Tools, access and the values you will need |
+| 1. Bootstrap | Workstation (as subscription Owner) | Resource groups, identities, roles |
+| 2. GitHub configuration | GitHub settings | Environment, variables, secrets |
+| 3. First images | GitHub Actions (Deploy, *images only*) | Images the apps are created from |
+| 4. Infrastructure | Workstation | Everything else, apps at zero replicas |
+| 5. Secrets | Workstation (IP allowed in step 4) | Key Vault contents |
+| 6. Database | Workstation (`az`) | Schema and database roles |
+| 7. Start the apps | Workstation, then GitHub settings | Replicas on, vaults closed, `TF_VARS_PROD` |
+| 8. Verify | Browser | |
+
+From then on every change goes through pull requests and GitHub Actions ([Ongoing releases](#ongoing-releases-cicd)).
+
 ## 0. Before you start
 
-You need:
+Tools on your workstation: Azure CLI (`az login` done), Terraform 1.17 or later 1.x (CI uses 1.17.1), and `jq`.
 
-- Azure: an account with **Owner** on the subscription (only for the one-time bootstrap) and `az login` done.
+Accounts and access:
+
+- Azure: an account with **Owner** on the subscription. The bootstrap and the first apply (steps 4 and 7)
+  create role assignments, which needs Owner (or *User Access Administrator* in addition to *Contributor*).
+  The Terraform state account and the shared container registry must be **in the same subscription** as Photo
+  Manager: the bootstrap builds their resource ids from `subscription_id`. Select it first:
+
+  ```bash
+  az account set --subscription <subscription-id>
+  ```
+
 - The existing Terraform state storage: storage account **`demonstration`** in **`rg-terraform-state`**,
   container **`terraform`**. This project's state files are `photo.bootstrap.tfstate` and
   `photo.terraform.tfstate`. Terraform authenticates to it with **Entra ID** (no storage keys), so your
@@ -27,16 +53,21 @@ You need:
   app). This project adds the repositories `photo-web`, `photo-worker` and `photo-migrator`. If the registry
   restricts network access, it must accept pushes from GitHub-hosted runners and pulls from the Container Apps
   environment.
-- Cloudflare: an API token with *Zone > DNS > Edit* limited to the `biffkittz.com` zone (plus, for pull-request
-  plans, a second token with *Zone > DNS > Read*).
-- Temporal Cloud: an account-level API key for Terraform (the `TF_VAR_temporal_api_key` you already have), the
-  region of the `photo.joqqs` namespace (Temporal Cloud UI > Namespaces > photo, e.g. `aws-us-east-1`), and
-  **API key authentication enabled on that namespace** (same page). The apps connect to the namespace
-  endpoint `photo.joqqs.tmprl.cloud:7233` with API keys, which Temporal recommends for all namespaces.
-- GitHub: admin on `biffkittz/photo-manager`.
-- A **production** GitHub OAuth app: Homepage `https://photo.biffkittz.com`,
-  callback `https://photo.biffkittz.com/signin-github`.
-- The Six Labors license (`sixlabors.lic`), the archive password, Wasabi keys and the Gemini key.
+- Cloudflare: an API token with *Zone > DNS > Edit* limited to the `biffkittz.com` zone, and a second token
+  with *Zone > DNS > Read* for plans.
+- Temporal Cloud:
+  - an API key with the **Account Admin** role for Terraform (it adopts the namespace and creates the apps'
+    service accounts): the `TF_VAR_temporal_api_key` you already have;
+  - an API key of a service account with the account role **Read**, for plans;
+  - the region of the `photo.joqqs` namespace (Temporal Cloud UI > Namespaces > photo, for example
+    `aws-us-east-2`);
+  - **API key authentication enabled on that namespace** (same page). The apps connect to the namespace
+    endpoint `photo.joqqs.tmprl.cloud:7233` with API keys, which Temporal recommends for all namespaces.
+- GitHub: admin on `biffkittz/photo-manager`, and this code on its `main` branch (step 3 builds from it).
+- A **production** GitHub OAuth app: Homepage `https://photo.biffkittz.com`, callback
+  `https://photo.biffkittz.com/signin-github`. Its client id and secret go into Key Vault in step 5.
+- At hand for step 5: the archive password (`protect.ps1`), the Wasabi access key id and secret, the Gemini API
+  key and the OAuth app's client id and secret. For step 2: the Six Labors license file (`sixlabors.lic`).
 
 Recommended before going live: create a **dedicated Wasabi access key** limited to the `photo-bk` bucket
 (a sub-user with a bucket-scoped policy) instead of the account root key, and keep **bucket versioning** on
@@ -62,16 +93,20 @@ on the shared registry, and the two GitHub OIDC identities (deploy, plan) in the
 cp infra/bootstrap/terraform.tfvars.example infra/bootstrap/terraform.tfvars   # set subscription_id
 terraform -chdir=infra/bootstrap init
 terraform -chdir=infra/bootstrap apply
-terraform -chdir=infra/bootstrap output -json                                  # values for the next steps
+terraform -chdir=infra/bootstrap output -json                                  # values for step 2
 ```
+
+`terraform.tfvars` only needs `subscription_id`; everything else has defaults (the registry, the state account,
+names). Set `container_registry_login_server` only if the registry's login server is not
+`crloginappdemo7fyguj.azurecr.io`.
 
 If Azure rejects the storage role assignments' conditions (`scope_state_access_to_prefix`), set that variable
 to `false`: the identities then get the role on the whole `terraform` container. See
 [infra/README.md](../infra/README.md#state).
 
-Applied the production configuration before 2026-11-20? Back then it created the app identities itself. Move
-them to the bootstrap before applying either configuration again (these commands change only Terraform's
-records, not Azure):
+**Skip this on a first deployment.** Only if you applied the production configuration before 2026-11-20 (it
+created the app identities itself back then), move them to the bootstrap before applying either configuration
+again. These commands change only Terraform's records, not Azure:
 
 ```bash
 for t in web worker migrator; do
@@ -95,47 +130,58 @@ rule is what actually enforces it.
 
 | Kind | Name | Value |
 |---|---|---|
-| Variable | `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_CLIENT_ID_DEPLOY`, `AZURE_CLIENT_ID_PLAN` | `terraform output github_actions` (bootstrap) |
+| Variable | `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_CLIENT_ID_DEPLOY`, `AZURE_CLIENT_ID_PLAN` | `github_actions` in the bootstrap output |
 | Variable | `ACR_NAME`, `ACR_LOGIN_SERVER` | same output: `crloginappdemo7fyguj` and `crloginappdemo7fyguj.azurecr.io` |
 | Variable | `AZURE_RESOURCE_GROUP` | `rg-photo-prod` |
 | Variable | `SITE_HOSTNAME` | `photo.biffkittz.com` |
-| Variable | `TF_VARS_PROD` | contents of your `infra/environments/prod/terraform.tfvars` (no secrets in it). Add it after step 4, once the file has its final `image_tag` and replica counts |
-| Repository secret | `CLOUDFLARE_API_TOKEN_READONLY` | Cloudflare token with *Zone > DNS > Read* on the zone (pull-request plans) |
-| Repository secret | `TEMPORAL_CLOUD_API_KEY_READONLY` | API key of a Temporal Cloud service account with the account role **Read** (pull-request plans) |
+| Variable | `TF_VARS_PROD` | **in step 7**, not now: the final `infra/environments/prod/terraform.tfvars` |
+| Repository secret | `CLOUDFLARE_API_TOKEN_READONLY` | Cloudflare token with *Zone > DNS > Read* on the zone (plans) |
+| Repository secret | `TEMPORAL_CLOUD_API_KEY_READONLY` | API key of a Temporal Cloud service account with the account role **Read** (plans) |
 | **production** environment secret | `CLOUDFLARE_API_TOKEN` | the DNS-edit token (apply only) |
-| **production** environment secret | `TEMPORAL_CLOUD_API_KEY` | the Temporal Cloud API key Terraform manages the namespace with (apply only) |
+| **production** environment secret | `TEMPORAL_CLOUD_API_KEY` | the Account Admin Temporal Cloud API key Terraform manages the namespace with (apply only) |
 | **production** environment secret | `SIXLABORS_LICENSE` | contents of `sixlabors.lic` (release image builds) |
 
 Write-capable credentials are **environment** secrets, so GitHub releases them only to jobs that run in the
-approved `production` environment; a pull request (even one that edits a workflow) can reach only the
-read-only ones. The Terraform backend needs no configuration in GitHub: it is in `versions.tf`.
+approved `production` environment. Plans (pull requests, and the `plan-main` job on `main`) get only the
+read-only repository secrets. The Terraform backend needs no configuration in GitHub: it is in `versions.tf`.
 
 Also enable *Code security*: Dependabot alerts/updates, secret scanning with **push protection**, and
 CodeQL (the workflow is included). Protect `main` (require pull requests and the CI checks).
+
+**Until step 7 is done**, pushes to `main` start runs that cannot succeed yet: a *Deploy* run (after CI) and, when
+`infra/` changed, a *Terraform* run whose `plan-main` job fails without `TF_VARS_PROD`. **Reject** their
+approval requests; the first apply is done from your workstation in step 4. The only run to approve before
+then is the images-only deployment of step 3.
 
 ## 3. First images
 
 The Container Apps need an image to exist before Terraform creates them:
 
-*Actions > Deploy > Run workflow* with **images_only** checked. Note the tag it prints (`sha-<12 chars>`).
+*Actions > Deploy > Run workflow*, branch **main**, with **images_only** checked, then approve the run. It
+builds and pushes the three images and skips everything else. The run summary shows the image tag:
+`sha-` followed by the first 12 characters of the commit (`git rev-parse --short=12 origin/main` gives the
+same). You need it in step 4.
 
 ## 4. Infrastructure (first apply: apps scaled to zero)
 
 The apps cannot run until their secrets (step 5) and the database (step 6) exist, so the first apply creates
 them with **zero replicas**. Otherwise they would crash-loop, and the apply could fail waiting for a healthy
-revision.
+revision. Run this from the machine you will use in step 5 (its public IP is let into the Key Vaults).
 
 ```bash
 cp infra/environments/prod/terraform.tfvars.example infra/environments/prod/terraform.tfvars
-#   set: image_tag (step 3), github_users, temporal_namespace_region, admin_ip_ranges = ["<your-ip>/32"],
+#   set: subscription_id, image_tag (step 3; required), github_users, temporal_namespace_region,
+#        admin_ip_ranges = ["<your public IP>/32"]   (curl -s https://api.ipify.org),
 #        key_vault_admin_object_ids = ["<az ad signed-in-user show --query id -o tsv>"],
-#        web_min_replicas = 0, worker_replicas = 0
-export CLOUDFLARE_API_TOKEN=...      # DNS-edit token
-export TF_VAR_temporal_api_key=...   # Temporal Cloud API key
+#        web_min_replicas = 0, worker_replicas = 0   (the example file already has these four as placeholders)
+export CLOUDFLARE_API_TOKEN=...      # the DNS-edit token
+export TF_VAR_temporal_api_key=...   # the Account Admin Temporal Cloud API key
 terraform -chdir=infra/environments/prod init
 terraform -chdir=infra/environments/prod plan -out tfplan     # review it: everything is created, plus 1 import (the Temporal namespace)
 terraform -chdir=infra/environments/prod apply tfplan
 ```
+
+Azure access comes from your `az login`. Keep those two environment variables in the shell for step 7.
 
 Notes:
 
@@ -144,15 +190,16 @@ Notes:
 - The managed TLS certificate is issued after the DNS records exist; the apply waits for it (a few minutes).
   If the Cloudflare TXT record shows a perpetual diff because of quoting, see [infra/README.md](../infra/README.md#known-provider-quirks).
 - `admin_ip_ranges` and `key_vault_admin_object_ids` let *you* populate Key Vault in the next step; both are
-  removed again afterwards.
+  removed again in step 7.
 
 ## 5. Secrets (Key Vault)
 
 1. Temporal Cloud UI > *Settings > Service accounts*: create an API key for **photo-prod-web** and one for
-   **photo-prod-worker** (`terraform -chdir=infra/environments/prod output temporal_service_account_ids`).
-   Set a 90-day expiry.
-2. Populate both vaults (values are prompted with hidden input, or taken from environment variables; the
-   script checks access to both vaults first and stops if a role assignment has not propagated yet):
+   **photo-prod-worker** (Terraform created both accounts in step 4; their ids:
+   `terraform -chdir=infra/environments/prod output temporal_service_account_ids`). Set a 90-day expiry.
+2. Populate both vaults, from the machine whose IP is in `admin_ip_ranges`. Role assignments from step 4 can
+   take a few minutes; the script checks access to both vaults first and stops if they have not propagated
+   yet (run it again a little later).
 
 ```bash
 scripts/bootstrap-keyvault.sh \
@@ -160,10 +207,16 @@ scripts/bootstrap-keyvault.sh \
   --worker-vault "$(terraform -chdir=infra/environments/prod output -json key_vaults | jq -r .worker)"
 ```
 
+It asks, with hidden input, for: the archive password, the Wasabi access key id and secret, the Gemini API key,
+the two Temporal service-account API keys (worker, web) and the GitHub OAuth app's client id and secret.
+(Each can instead come from an environment variable; see `scripts/bootstrap-keyvault.sh --help`.) It generates
+the web key, the Temporal payload key and the Data Protection key itself and stores them in the right vaults.
+Values are never printed. Running it again only fills in what is missing.
+
 ## 6. Database
 
 The migration job applies the schema and creates the least-privilege PostgreSQL roles for the web and worker
-identities. It must finish before the apps start:
+identities. It needs no secrets, but must finish before the apps start:
 
 ```bash
 az containerapp job start -g rg-photo-prod -n caj-photo-migrate
@@ -174,15 +227,19 @@ The deploy workflow runs it automatically on every later release.
 
 ## 7. Start the apps
 
-In `terraform.tfvars` set `web_min_replicas = 1` and `worker_replicas = 1`, remove your IP from
-`admin_ip_ranges` (vaults back to private-endpoint-only) and empty `key_vault_admin_object_ids` (unless you want
-to keep Key Vault admin rights), then apply again:
+In `infra/environments/prod/terraform.tfvars` set `web_min_replicas = 1` and `worker_replicas = 1`, set
+`admin_ip_ranges = []` (vaults back to private-endpoint-only) and `key_vault_admin_object_ids = []` (unless you
+want to keep Key Vault admin rights), then apply again from the same shell:
 
 ```bash
 terraform -chdir=infra/environments/prod apply
 ```
 
-Now copy the final `terraform.tfvars` into the `TF_VARS_PROD` GitHub variable (step 2).
+Now create the `TF_VARS_PROD` GitHub variable (step 2) with the contents of this final `terraform.tfvars`. It
+holds no secrets (keys come from environment variables) and must not contain settings the configuration no
+longer has, such as `container_registry_resource_group` (Terraform warns about undeclared variables). From now
+on, infrastructure changes go through pull requests and the *Terraform* workflow; if you ever apply from your
+workstation again, keep your local file identical to `TF_VARS_PROD`.
 
 ## 8. Verify
 
@@ -218,6 +275,8 @@ flowchart LR
   summary *before* the **apply** job asks for approval. Read it, then approve. The apply job plans again with the
   deploy identity and applies only if that plan makes exactly the same changes; if Azure or the state changed
   in between, it stops without applying and you re-run the workflow to review the new plan.
+- Changing only `TF_VARS_PROD` starts nothing (the workflow runs when `infra/` changes on `main`): run
+  *Actions > Terraform > Run workflow* on `main` to apply it.
 - Only the newest commit on `main` is deployed: a run whose commit is no longer the tip of `main` is skipped
   before approval and fails after approval (the newer commit is deployed by its own run). Roll back deliberately
   as described above, never by re-running an old deployment.

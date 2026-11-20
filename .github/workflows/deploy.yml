@@ -82,7 +82,10 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
       - id: tag
-        run: echo "tag=sha-${COMMIT::12}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "tag=sha-${COMMIT::12}" >> "$GITHUB_OUTPUT"
+          echo "Image tag: sha-${COMMIT::12}"
+          echo "**Image tag:** \`sha-${COMMIT::12}\`" >> "$GITHUB_STEP_SUMMARY"
       - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID_DEPLOY }}
