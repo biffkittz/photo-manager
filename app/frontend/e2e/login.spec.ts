@@ -16,6 +16,14 @@ test('denied accounts see an explanation', async ({ page }) => {
   await expect(page.getByRole('alert')).toContainText('not allowed')
 })
 
+test('a sign-in that did not complete is not reported as a denied account', async ({ page }) => {
+  await mockSession(page, null)
+  await page.goto('/login?error=signin_failed')
+  await expect(page.getByRole('alert')).toContainText('did not complete')
+  await expect(page.getByRole('alert')).not.toContainText('not allowed')
+  await expectAccessible(page)
+})
+
 test('an unreachable server is explained, not treated as signed out, and retried', async ({
   page,
 }) => {

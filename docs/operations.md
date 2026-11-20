@@ -104,6 +104,20 @@ their next request. Signing out (or the session ending) in one browser tab ends 
 of the app as well, and a tab re-checks the session when it comes back to the foreground. The GitHub sign-in
 callback accepts at most 30 requests a minute per IP address.
 
+### Sign-in problems
+
+- "That GitHub account is not allowed to use Photo Manager." means GitHub identified an account that is not in
+  `github_users` (recorded as `auth.denied` in the audit trail). Check which account the browser is signed in to
+  on github.com, and the numeric id: `curl -s https://api.github.com/users/<login> | jq .id`. The ids the app
+  uses: `az containerapp show -g rg-photo-prod -n ca-photo-web --query "properties.template.containers[0].env[?starts_with(name, 'Auth__Users')]" -o table`.
+- "Signing in with GitHub did not complete." is any other failure. The web app logs the reason as a warning:
+  `az containerapp logs show -g rg-photo-prod -n ca-photo-web --tail 200 | grep "GitHub sign-in failed"`.
+  Typical reasons: `redirect_uri_mismatch` (the production OAuth app's callback must be exactly
+  `https://photo.biffkittz.com/signin-github`), `incorrect_client_credentials` (the client id or secret in the
+  web vault is not the production OAuth app's: update them with `scripts/bootstrap-keyvault.sh --update
+  Auth--GitHubClientSecret`, then restart the web app), `access_denied` (cancelled on GitHub), or an expired or
+  invalid `oauth state` (the sign-in took more than 15 minutes, or cookies were blocked).
+
 ## Container registry storage
 
 Images live in the registry **`crloginappdemo7fyguj`** (`rg-loginapp-demo`), shared with the login app. Every

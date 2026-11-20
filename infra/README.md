@@ -145,6 +145,11 @@ Details for each step, including the exact commands: [docs/deployment.md](../doc
   `asuid` verification record (`modules/custom-domain`) shows a diff on every plan, or the first apply fails
   with "Provider produced inconsistent result", set its `content` to `"\"${var.verification_id}\""` (quoted),
   which is what the API stores. Verify on the first apply; it cannot be tested without the real account.
+- **Custom domain validation right after the DNS records are created.** Azure checks the `asuid` TXT record
+  as soon as the hostname is added; if Cloudflare is not serving the new record yet, the apply fails with
+  `InvalidCustomHostNameValidation: A TXT record ... was not found`, and resolvers may remember "not found" for
+  the zone's negative TTL (30 minutes). The module waits 60 s after creating the records to avoid this; if it
+  still happens, wait up to 30 minutes and apply again (the records themselves are already in place).
 - **Managed certificate on teardown.** `azapi_update_resource` does not unbind the certificate when destroyed.
   Before setting `manage_dns = false` (or destroying), unbind the hostname first:
   `az containerapp hostname delete -g rg-photo-prod -n ca-photo-web --hostname photo.biffkittz.com`.

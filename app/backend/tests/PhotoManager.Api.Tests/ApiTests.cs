@@ -453,18 +453,24 @@ public sealed class ApiTests(ApiFactory factory)
     }
 
     [Fact]
-    public async Task OAuth_callback_is_rate_limited_although_authentication_answers_it()
+    public async Task OAuth_callback_failures_are_reported_as_failed_and_rate_limited()
     {
+        // One test, because the callback's per-IP limit is shared by every request in this test host.
         var client = factory.ClientFor(null);
-        var statuses = new List<HttpStatusCode>();
+        var responses = new List<(HttpStatusCode Status, string? Location)>();
         for (var i = 0; i < 31; i++)
         {
-            using var response = await client.GetAsync($"{AuthenticationSetup.CallbackPath}?code=x&state=x", Ct);
-            statuses.Add(response.StatusCode);
+            using var response = await client.GetAsync($"{AuthenticationSetup.CallbackPath}?error=access_denied&state=x", Ct);
+            responses.Add((response.StatusCode, response.Headers.Location?.OriginalString));
         }
 
-        Assert.All(statuses.Take(30), status => Assert.NotEqual(HttpStatusCode.TooManyRequests, status));
-        Assert.Equal(HttpStatusCode.TooManyRequests, statuses[^1]);
+        // A callback GitHub did not complete (here: no valid state) is a failed sign-in, never "account not
+        // allowed": only the allowlist check sends people to the denied page.
+        Assert.Equal((HttpStatusCode.Redirect, AuthenticationSetup.FailedRedirect), responses[0]);
+
+        // The authentication middleware answers the callback, yet the 31st within a minute is refused.
+        Assert.All(responses.Take(30), r => Assert.NotEqual(HttpStatusCode.TooManyRequests, r.Status));
+        Assert.Equal(HttpStatusCode.TooManyRequests, responses[^1].Status);
     }
 
     [Fact]

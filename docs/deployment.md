@@ -201,6 +201,9 @@ Notes:
 - `temporal_import_existing_namespace = true` (default) adopts the existing `photo.joqqs` namespace and turns
   on delete protection. `temporal_namespace_region` must match it exactly (regions cannot change).
 - The managed TLS certificate is issued after the DNS records exist; the apply waits for it (a few minutes).
+  If the apply fails with `InvalidCustomHostNameValidation: A TXT record ... was not found`, Azure looked for the
+  `asuid` record before Cloudflare served it. The records are in place; run `plan -out tfplan` and `apply tfplan`
+  again, and if the same error comes back, wait up to 30 minutes (resolvers cache "not found" that long) first.
   If the Cloudflare TXT record shows a perpetual diff because of quoting, see [infra/README.md](../infra/README.md#known-provider-quirks).
 - `admin_ip_ranges` and `key_vault_admin_object_ids` let *you* populate Key Vault in the next step; both are
   removed again in step 7.

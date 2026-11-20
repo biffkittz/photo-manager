@@ -13,6 +13,12 @@ public static class AuthenticationSetup
     /// <summary>Path GitHub redirects back to after sign-in; handled inside the authentication middleware.</summary>
     public const string CallbackPath = "/signin-github";
 
+    /// <summary>Where a GitHub account that is not on the allowlist is sent.</summary>
+    public const string DeniedRedirect = "/login?error=access_denied";
+
+    /// <summary>Where any other failed GitHub sign-in is sent (the reason is logged, not shown).</summary>
+    public const string FailedRedirect = "/login?error=signin_failed";
+
     internal const string ClearSiteDataHeader = "Clear-Site-Data";
     internal const string ClearCacheDirective = "\"cache\"";
 
@@ -97,29 +103,42 @@ public static class AuthenticationSetup
                 options.CorrelationCookie.SameSite = SameSiteMode.Lax;
                 options.CorrelationCookie.SecurePolicy = secure ? CookieSecurePolicy.Always : CookieSecurePolicy.SameAsRequest;
 
-                options.Events.OnCreatingTicket = async context =>
+                // The allowlist is enforced here, after GitHub has identified the account and before any session
+                // exists: HandleResponse() stops the sign-in, so a denied account never gets a cookie. (A Fail() in
+                // OnCreatingTicket is not honoured by the OAuth handler.)
+                options.Events.OnTicketReceived = async context =>
                 {
-                    var auth = context.HttpContext.RequestServices.GetRequiredService<IOptionsMonitor<AuthOptions>>().CurrentValue;
-                    var audit = context.HttpContext.RequestServices.GetRequiredService<AuditLog>();
-                    var principal = new ClaimsPrincipal(context.Identity!);
-                    var allowed = auth.Find(principal.GitHubId());
+                    var services = context.HttpContext.RequestServices;
+                    var auth = services.GetRequiredService<IOptionsMonitor<AuthOptions>>().CurrentValue;
+                    var audit = services.GetRequiredService<AuditLog>();
+                    var principal = context.Principal!;
+                    var gitHubId = principal.GitHubId();
+                    var allowed = auth.Find(gitHubId);
                     if (allowed is null)
                     {
-                        await audit.WriteAsync("auth.denied", principal.GitHubId().ToString(System.Globalization.CultureInfo.InvariantCulture), new { login = principal.Login() }, actorOverride: principal.Login(), actorIdOverride: principal.GitHubId());
-                        context.Fail("This GitHub account is not allowed to use Photo Manager.");
+                        await audit.WriteAsync("auth.denied", gitHubId.ToString(System.Globalization.CultureInfo.InvariantCulture), new { login = principal.Login() }, actorOverride: principal.Login(), actorIdOverride: gitHubId);
+                        context.Response.Redirect(DeniedRedirect);
+                        context.HandleResponse();
                         return;
                     }
 
-                    var signedInAt = context.HttpContext.RequestServices.GetRequiredService<TimeProvider>().GetUtcNow().ToUnixTimeSeconds();
-                    context.Identity!.AddClaim(new Claim(ClaimTypes.Role, allowed.Role));
-                    context.Identity.AddClaim(new Claim(PhotoClaims.SignedInAt, signedInAt.ToString(System.Globalization.CultureInfo.InvariantCulture)));
-                    await audit.WriteAsync("auth.signin", null, null, actorOverride: principal.Login(), actorIdOverride: principal.GitHubId());
+                    var signedInAt = services.GetRequiredService<TimeProvider>().GetUtcNow().ToUnixTimeSeconds();
+                    var identity = (ClaimsIdentity)principal.Identity!;
+                    identity.AddClaim(new Claim(ClaimTypes.Role, allowed.Role));
+                    identity.AddClaim(new Claim(PhotoClaims.SignedInAt, signedInAt.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+                    await audit.WriteAsync("auth.signin", null, null, actorOverride: principal.Login(), actorIdOverride: gitHubId);
                 };
 
-                // Never show handler error details to the browser; the SPA renders a friendly page.
+                // Any other failure (the OAuth app's callback URL or credentials, a sign-in cancelled on GitHub, an
+                // expired or replayed callback) is not "not allowed". The browser gets a generic page; the reason goes
+                // to the log, where the operator can see it. It never contains a secret: it is the handler's message
+                // and GitHub's error code.
                 options.Events.OnRemoteFailure = context =>
                 {
-                    context.Response.Redirect("/login?error=access_denied");
+                    context.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>()
+                        .CreateLogger(typeof(AuthenticationSetup))
+                        .LogWarning("GitHub sign-in failed: {Reason}", context.Failure?.Message ?? "unknown");
+                    context.Response.Redirect(FailedRedirect);
                     context.HandleResponse();
                     return Task.CompletedTask;
                 };

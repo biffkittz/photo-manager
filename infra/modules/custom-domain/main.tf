@@ -35,11 +35,23 @@ resource "cloudflare_dns_record" "verification" {
   comment = "Azure Container Apps domain verification (managed by Terraform)"
 }
 
+# Azure validates the asuid TXT record the moment the hostname is added. Cloudflare needs a little while to
+# serve a new record from all its nameservers, and an early "not found" answer is then cached for the zone's
+# negative TTL (30 minutes for biffkittz.com), failing the apply with InvalidCustomHostNameValidation. So the
+# apply waits a minute after creating or replacing the records (and only then; later applies do not wait).
+resource "terraform_data" "dns_propagation" {
+  triggers_replace = [cloudflare_dns_record.cname.id, cloudflare_dns_record.verification.id]
+
+  provisioner "local-exec" {
+    command = "sleep 60"
+  }
+}
+
 resource "azurerm_container_app_custom_domain" "this" {
   name             = var.hostname
   container_app_id = var.container_app_id
 
-  depends_on = [cloudflare_dns_record.cname, cloudflare_dns_record.verification]
+  depends_on = [terraform_data.dns_propagation]
 
   lifecycle {
     # The managed certificate is bound asynchronously below; ignoring these stops Terraform from

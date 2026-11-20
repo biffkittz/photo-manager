@@ -6,6 +6,8 @@ import { urls } from '@/api/endpoints'
 const route = useRoute()
 const router = useRouter()
 const denied = computed(() => route.query.error === 'access_denied')
+// Any other failed GitHub sign-in (cancelled, expired, or a configuration problem the operator sees in the logs).
+const failed = computed(() => route.query.error === 'signin_failed')
 // The session could not be checked (offline or a server error); that does not mean the user is signed out.
 const unavailable = computed(() => route.query.error === 'unavailable')
 // The server re-validates the return URL (open-redirect protection); only local paths are accepted here too.
@@ -28,6 +30,9 @@ function tryAgain(): void {
     <p class="mt-2 text-sm text-muted">A private, encrypted family photo library.</p>
     <p v-if="denied" role="alert" class="mt-4 rounded-md bg-danger/10 p-3 text-sm text-danger">
       That GitHub account is not allowed to use Photo Manager.
+    </p>
+    <p v-if="failed" role="alert" class="mt-4 rounded-md bg-danger/10 p-3 text-sm text-danger">
+      Signing in with GitHub did not complete. Please try again.
     </p>
     <div
       v-if="unavailable"
