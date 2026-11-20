@@ -20,11 +20,25 @@ locals {
   state_resource_group_id = "/subscriptions/${var.subscription_id}/resourceGroups/${var.state_resource_group_name}"
   state_container_id      = "${local.state_resource_group_id}/providers/Microsoft.Storage/storageAccounts/${var.state_storage_account_name}/blobServices/default/containers/${var.state_container_name}"
 
-  # ABAC condition limiting the CI identities to the production state inside the shared container (blobs whose
+  # ABAC conditions limiting the CI identities to the production state inside the shared container (blobs whose
   # name starts with var.state_blob_prefix, by default photo.terraform.tfstate and its workspace states):
   # reads, writes, leases and deletes need a matching blob path; listings need a matching prefix. This
   # configuration's own state (photo.bootstrap.tfstate) does not match, so CI can neither read nor change it.
-  state_blob_condition = <<-EOT
+  # Azure rejects a condition that mentions an action its role does not grant, so the read-only role gets a
+  # condition that names reads only.
+  state_blob_list_condition = <<-EOT
+    (
+     (
+      !(ActionMatches{'Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read'} AND SubOperationMatches{'Blob.List'})
+     )
+     OR
+     (
+      @Request[Microsoft.Storage/storageAccounts/blobServices/containers/blobs:prefix] StringStartsWith '${var.state_blob_prefix}'
+     )
+    )
+  EOT
+
+  state_write_condition = <<-EOT
     (
      (
       !(ActionMatches{'Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read'} AND NOT SubOperationMatches{'Blob.List'})
@@ -41,15 +55,21 @@ locals {
      )
     )
     AND
+    ${trimspace(local.state_blob_list_condition)}
+  EOT
+
+  state_read_condition = <<-EOT
     (
      (
-      !(ActionMatches{'Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read'} AND SubOperationMatches{'Blob.List'})
+      !(ActionMatches{'Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read'} AND NOT SubOperationMatches{'Blob.List'})
      )
      OR
      (
-      @Request[Microsoft.Storage/storageAccounts/blobServices/containers/blobs:prefix] StringStartsWith '${var.state_blob_prefix}'
+      @Resource[Microsoft.Storage/storageAccounts/blobServices/containers/blobs:path] StringStartsWith '${var.state_blob_prefix}'
      )
     )
+    AND
+    ${trimspace(local.state_blob_list_condition)}
   EOT
 
   # Blob permissions for the custom roles below. None of them can write or delete a container: the built-in
@@ -281,7 +301,7 @@ resource "azurerm_role_assignment" "deploy_state" {
   principal_id       = azurerm_user_assigned_identity.github_deploy.principal_id
   principal_type     = "ServicePrincipal"
   condition_version  = var.scope_state_access_to_prefix ? "2.0" : null
-  condition          = var.scope_state_access_to_prefix ? local.state_blob_condition : null
+  condition          = var.scope_state_access_to_prefix ? local.state_write_condition : null
 }
 
 # Plan identity: Reader plus the Container Apps "listSecrets" actions, which the azurerm provider calls while
@@ -318,7 +338,7 @@ resource "azurerm_role_assignment" "plan_state" {
   principal_id       = azurerm_user_assigned_identity.github_plan.principal_id
   principal_type     = "ServicePrincipal"
   condition_version  = var.scope_state_access_to_prefix ? "2.0" : null
-  condition          = var.scope_state_access_to_prefix ? local.state_blob_condition : null
+  condition          = var.scope_state_access_to_prefix ? local.state_read_condition : null
 }
 
 # ---------------------------------------------------------------------------------------------------
