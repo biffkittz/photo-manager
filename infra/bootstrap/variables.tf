@@ -26,16 +26,67 @@ variable "environment" {
   default     = "prod"
 }
 
-variable "name_suffix" {
-  description = "Suffix for globally unique names (storage, registry). Empty derives a stable one from the subscription id."
-  type        = string
-  default     = ""
-}
-
 variable "github_repository" {
   description = "GitHub repository (owner/name) whose Actions may sign in to Azure with OIDC."
   type        = string
   default     = "biffkittz/photo-manager"
+}
+
+variable "container_registry_name" {
+  description = "Existing container registry the images are pushed to (shared with another project)."
+  type        = string
+  default     = "crloginappdemo7fyguj"
+
+  validation {
+    condition     = can(regex("^[a-zA-Z0-9]{5,50}$", var.container_registry_name))
+    error_message = "container_registry_name must be 5-50 letters or digits (an Azure Container Registry name)."
+  }
+}
+
+variable "container_registry_resource_group" {
+  description = "Resource group of the existing container registry (same subscription)."
+  type        = string
+  default     = "rg-loginapp-demo"
+}
+
+variable "container_registry_login_server" {
+  description = "Login server of the registry; empty means <name>.azurecr.io. Set it only if the registry uses a domain name label (login server with a hash suffix)."
+  type        = string
+  default     = ""
+}
+
+variable "registry_cleanup_enabled" {
+  description = "Run the weekly clean-up of this project's images (photo-web, photo-worker, photo-migrator) in the shared registry."
+  type        = bool
+  default     = true
+}
+
+variable "registry_cleanup_older_than_days" {
+  description = "Image tags older than this many days are candidates for deletion."
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = var.registry_cleanup_older_than_days >= 7
+    error_message = "registry_cleanup_older_than_days must be at least 7."
+  }
+}
+
+variable "registry_cleanup_keep" {
+  description = "Always keep this many of the newest candidate tags per repository (rollback targets)."
+  type        = number
+  default     = 10
+
+  validation {
+    condition     = var.registry_cleanup_keep >= 3
+    error_message = "registry_cleanup_keep must be at least 3 so recent releases stay available for rollback."
+  }
+}
+
+variable "registry_cleanup_dry_run" {
+  description = "Only log what the clean-up would delete (az acr task logs); nothing is removed."
+  type        = bool
+  default     = false
 }
 
 variable "state_resource_group_name" {

@@ -1,5 +1,4 @@
 locals {
-  suffix = var.name_suffix != "" ? var.name_suffix : substr(sha1("${var.subscription_id}-${var.project}"), 0, 6)
   tags = merge(var.tags, {
     project     = var.project
     environment = var.environment
@@ -8,6 +7,12 @@ locals {
   })
 
   github_oidc_issuer = "https://token.actions.githubusercontent.com"
+
+  # The container registry is an existing one shared with another project. Like the state account below, it is
+  # referenced by name rather than read with a data source, which would copy its admin password (if the admin
+  # user is enabled) into this configuration's state.
+  registry_id           = "/subscriptions/${var.subscription_id}/resourceGroups/${var.container_registry_resource_group}/providers/Microsoft.ContainerRegistry/registries/${var.container_registry_name}"
+  registry_login_server = var.container_registry_login_server != "" ? var.container_registry_login_server : "${lower(var.container_registry_name)}.azurecr.io"
 
   # The Terraform state lives in an existing storage account shared with other projects (see versions.tf).
   # Its id is built from names rather than read with a data source, which would copy that account's access
@@ -47,7 +52,6 @@ locals {
   # Data-plane roles the deploy identity may grant to the app's managed identities, and nothing else
   # (constrained delegation: it cannot make anyone Owner or grant itself more rights).
   assignable_roles = [
-    "AcrPull",
     "Key Vault Secrets User",
     "Key Vault Crypto User",
     "Key Vault Secrets Officer",
@@ -64,24 +68,18 @@ data "azurerm_role_definition" "assignable" {
   name     = each.value
 }
 
+data "azurerm_role_definition" "acr_pull" {
+  name = "AcrPull"
+}
+
 # ---------------------------------------------------------------------------------------------------
-# Application resource group and container registry. The registry lives here (not in the app
-# configuration) so CI can push the first images before the Container Apps that use them exist.
+# Application resource group. Images go to the existing, shared container registry
+# (var.container_registry_*), so CI can push the first images before the Container Apps exist.
 # ---------------------------------------------------------------------------------------------------
 resource "azurerm_resource_group" "app" {
   name     = "rg-${var.project}-${var.environment}"
   location = var.location
   tags     = merge(local.tags, { layer = "app" })
-}
-
-resource "azurerm_container_registry" "this" {
-  name                   = "cr${var.project}${local.suffix}"
-  resource_group_name    = azurerm_resource_group.app.name
-  location               = azurerm_resource_group.app.location
-  sku                    = "Basic"
-  admin_enabled          = false # pulls use managed identity (AcrPull); no shared credentials exist
-  anonymous_pull_enabled = false
-  tags                   = local.tags
 }
 
 # ---------------------------------------------------------------------------------------------------
@@ -169,11 +167,47 @@ resource "azurerm_role_assignment" "deploy_rbac_admin" {
   EOT
 }
 
+# Registry: push this project's images (photo-web, photo-worker, photo-migrator). AcrPush applies to the whole
+# shared registry; repository-level scoping would require switching the registry to ABAC repository
+# permissions, which would change how the other project's existing role assignments work.
 resource "azurerm_role_assignment" "deploy_acr_push" {
-  scope                = azurerm_container_registry.this.id
+  scope                = local.registry_id
   role_definition_name = "AcrPush"
   principal_id         = azurerm_user_assigned_identity.github_deploy.principal_id
   principal_type       = "ServicePrincipal"
+}
+
+# The production configuration grants its app identities AcrPull on the registry. The deploy identity may do
+# exactly that there: assign or remove AcrPull, to anyone but itself.
+resource "azurerm_role_assignment" "deploy_registry_rbac_admin" {
+  scope                = local.registry_id
+  role_definition_name = "Role Based Access Control Administrator"
+  principal_id         = azurerm_user_assigned_identity.github_deploy.principal_id
+  principal_type       = "ServicePrincipal"
+  condition_version    = "2.0"
+  condition            = <<-EOT
+    (
+     (
+      !(ActionMatches{'Microsoft.Authorization/roleAssignments/write'})
+     )
+     OR
+     (
+      @Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {${basename(data.azurerm_role_definition.acr_pull.id)}}
+      AND
+      @Request[Microsoft.Authorization/roleAssignments:PrincipalId] ForAnyOfAllValues:GuidNotEquals {${azurerm_user_assigned_identity.github_deploy.principal_id}}
+     )
+    )
+    AND
+    (
+     (
+      !(ActionMatches{'Microsoft.Authorization/roleAssignments/delete'})
+     )
+     OR
+     (
+      @Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {${basename(data.azurerm_role_definition.acr_pull.id)}}
+     )
+    )
+  EOT
 }
 
 # State: read and write this project's state blobs (photo.*) in the shared container, nothing else there.
@@ -212,6 +246,30 @@ resource "azurerm_role_assignment" "plan_reader" {
   principal_type     = "ServicePrincipal"
 }
 
+# On the shared registry the plan only refreshes the app identities' AcrPull assignments, so it may read the
+# registry resource and its role assignments, but not pull images (which "Reader" would allow).
+resource "azurerm_role_definition" "terraform_planner_registry" {
+  name        = "${var.project}-${var.environment}-terraform-planner-registry"
+  scope       = local.registry_id
+  description = "Lets the Photo Manager plan identity read the shared container registry and its role assignments (no image pulls)."
+
+  permissions {
+    actions = [
+      "Microsoft.ContainerRegistry/registries/read",
+      "Microsoft.Authorization/roleAssignments/read",
+    ]
+  }
+
+  assignable_scopes = [local.registry_id]
+}
+
+resource "azurerm_role_assignment" "plan_registry_reader" {
+  scope              = local.registry_id
+  role_definition_id = azurerm_role_definition.terraform_planner_registry.role_definition_resource_id
+  principal_id       = azurerm_user_assigned_identity.github_plan.principal_id
+  principal_type     = "ServicePrincipal"
+}
+
 # Pull-request plans run with -lock=false (.github/workflows/terraform.yml), so they only need to read the state:
 # code under review can never overwrite or delete it.
 resource "azurerm_role_assignment" "plan_state" {
@@ -221,4 +279,43 @@ resource "azurerm_role_assignment" "plan_state" {
   principal_type       = "ServicePrincipal"
   condition_version    = var.scope_state_access_to_prefix ? "2.0" : null
   condition            = var.scope_state_access_to_prefix ? local.state_blob_condition : null
+}
+
+# ---------------------------------------------------------------------------------------------------
+# Weekly image clean-up in the shared registry (an ACR task: it runs inside the registry on a timer, so no
+# extra identity or CI secret is involved). It only matches this project's repositories: the repository
+# filter must match the whole name, so the login app's images can never be selected.
+#   --ago/--keep  delete tags older than N days, but always keep the newest K of those (rollback targets)
+#   --untagged    also delete the image data no tag points to any more; manifests referenced by a still-
+#                 tagged image index (per-platform images, SBOM/provenance attestations) are never deleted
+# Run it on demand: az acr task run --registry <registry> --name photo-manager-image-cleanup
+# ---------------------------------------------------------------------------------------------------
+resource "azurerm_container_registry_task" "image_cleanup" {
+  count                 = var.registry_cleanup_enabled ? 1 : 0
+  name                  = "photo-manager-image-cleanup"
+  container_registry_id = local.registry_id
+  timeout_in_seconds    = 3600
+  tags                  = local.tags
+
+  platform {
+    os = "Linux"
+  }
+
+  encoded_step {
+    context_path = "/dev/null"
+    task_content = base64encode(<<-YAML
+      version: v1.1.0
+      steps:
+        - cmd: "acr purge --filter 'photo-(web|worker|migrator):.*' --ago ${var.registry_cleanup_older_than_days}d --keep ${var.registry_cleanup_keep} --untagged${var.registry_cleanup_dry_run ? " --dry-run" : ""}"
+          disableWorkingDirectoryOverride: true
+          timeout: 3600
+    YAML
+    )
+  }
+
+  timer_trigger {
+    name     = "weekly"
+    schedule = "0 3 * * 0" # Sundays 03:00 UTC
+    enabled  = true
+  }
 }

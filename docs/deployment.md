@@ -23,6 +23,10 @@ You need:
     --scope "$(az storage account show -g rg-terraform-state -n demonstration --query id -o tsv)/blobServices/default/containers/terraform"
   ```
 
+- The existing container registry **`crloginappdemo7fyguj`** in **`rg-loginapp-demo`** (shared with the login
+  app). This project adds the repositories `photo-web`, `photo-worker` and `photo-migrator`. If the registry
+  restricts network access, it must accept pushes from GitHub-hosted runners and pulls from the Container Apps
+  environment.
 - Cloudflare: an API token with *Zone > DNS > Edit* limited to the `biffkittz.com` zone (plus, for pull-request
   plans, a second token with *Zone > DNS > Read*).
 - Temporal Cloud: an account-level API key for Terraform (the `TF_VAR_temporal_api_key` you already have), the
@@ -40,10 +44,13 @@ Recommended before going live: create a **dedicated Wasabi access key** limited 
 
 ## 1. Bootstrap (once, from your workstation)
 
-Creates the app resource group, the container registry, and the two GitHub OIDC identities (deploy, plan)
-in their own resource group `rg-photo-cicd`, with least-privilege roles. Both identities get access to this
-project's state blobs (`photo.*`) in the shared `terraform` container and nothing else in it. The bootstrap's
-own state goes to `photo.bootstrap.tfstate`.
+Creates the app resource group and the two GitHub OIDC identities (deploy, plan) in their own resource group
+`rg-photo-cicd`, with least-privilege roles. Both identities get access to this project's state blobs
+(`photo.*`) in the shared `terraform` container and nothing else in it. On the shared registry, the deploy
+identity gets *AcrPush* plus the right to grant *AcrPull* (and only that) to the app identities, and the plan
+identity may read the registry and its role assignments. The only thing created in the registry is the weekly
+clean-up task for this project's images ([operations.md](operations.md#container-registry-storage)). The
+bootstrap's own state goes to `photo.bootstrap.tfstate`.
 
 ```bash
 cp infra/bootstrap/terraform.tfvars.example infra/bootstrap/terraform.tfvars   # set subscription_id
@@ -66,7 +73,7 @@ deploy then waits for approval) and restrict it to the `main` branch.
 | Kind | Name | Value |
 |---|---|---|
 | Variable | `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_CLIENT_ID_DEPLOY`, `AZURE_CLIENT_ID_PLAN` | `terraform output github_actions` (bootstrap) |
-| Variable | `ACR_LOGIN_SERVER` | `terraform output container_registry_login_server` |
+| Variable | `ACR_NAME`, `ACR_LOGIN_SERVER` | same output: `crloginappdemo7fyguj` and `crloginappdemo7fyguj.azurecr.io` |
 | Variable | `AZURE_RESOURCE_GROUP` | `rg-photo-prod` |
 | Variable | `SITE_HOSTNAME` | `photo.biffkittz.com` |
 | Variable | `TF_VARS_PROD` | contents of your `infra/environments/prod/terraform.tfvars` (no secrets in it). Add it after step 4, once the file has its final `image_tag` and replica counts |
@@ -190,6 +197,6 @@ flowchart LR
 ## Cost notes (approximate, per month)
 
 Container Apps (web 0.5 vCPU min 1 + worker 1 vCPU min 1, mostly idle) ~$15-30; PostgreSQL B1ms ~$15;
-private endpoints (2 vaults + blob) ~$22; Container Registry Basic ~$5 (10 GiB included, see
-[operations.md](operations.md#container-registry-storage)); Log Analytics/App Insights depends on volume (~$5);
-Key Vault and storage cents. Temporal Cloud and Gemini are billed separately.
+private endpoints (2 vaults + blob) ~$22; Log Analytics/App Insights depends on volume (~$5); Key Vault and
+storage cents. The images add storage to the shared registry (see
+[operations.md](operations.md#container-registry-storage)). Temporal Cloud and Gemini are billed separately.

@@ -16,6 +16,9 @@ Read the root `CLAUDE.md` first. Overview and conventions: `infra/README.md`; de
   this project's blobs `photo.*.tfstate`), Entra auth only, configured inline in each `versions.tf`. Never read,
   write or list other projects' blobs there; never add a data source that reads that account (it would copy
   its keys into state). CI access is scoped to `photo.*` by ABAC (`infra/bootstrap`, docs/adr/0009).
+- The container registry is the owner's existing, **shared** `crloginappdemo7fyguj` (`rg-loginapp-demo`). Never
+  create, modify or read it with a data source (admin password into state); refer to it by name. Only add role
+  assignments for this project's identities; repositories are `photo-*` (docs/adr/0011).
 - Data services stay private (no public network access, no shared keys, Entra-only PostgreSQL). Storage
   containers are managed through ARM (`storage_account_id`); the provider runs with
   `data_plane_available = false`.

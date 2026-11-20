@@ -41,12 +41,12 @@ PostgreSQL, Key Vault, Terraform. Site: `photo.biffkittz.com`.
 v1 plus all confirmed Gemini-review fixes, verified locally; nothing is deployed or committed yet. Tests: backend
 135 (Core 69, Worker 40, Api 23, Integration 3), frontend lint/format/types + 30 unit + 5 E2E. Terraform state uses
 the owner's existing account (`rg-terraform-state`/`demonstration`/`terraform`, keys `photo.*.tfstate`, Entra
-auth; docs/adr/0009). Duplicates are hidden, never deleted (docs/adr/0010).
+auth; docs/adr/0009). Images go to the owner's existing registry `crloginappdemo7fyguj` (`rg-loginapp-demo`, shared
+with the login app; repositories `photo-*`; docs/adr/0011). Duplicates are hidden, never deleted (docs/adr/0010).
 
-Open with the user: (1) the real-archive duplicate scan was blocked by the permission system and needs their
-decision (run it, or let the deployed thumbnail backfill find duplicates); (2) container registry clean-up job
-(explained in docs/operations.md#container-registry-storage); (3) items to verify on first deploy (state ABAC
-condition, Cloudflare TXT quoting, Temporal namespace API-key auth).
+The user chose to skip a scan of the real archive for duplicates (2026-11-19): in-app hiding during the thumbnail
+backfill covers it. A weekly ACR task deletes old `photo-*` images (infra/bootstrap). Still to check on the first
+deploy: the state ABAC condition, Cloudflare TXT quoting, Temporal namespace API-key auth.
 
 Per-area rules: `app/backend/CLAUDE.md`, `app/frontend/CLAUDE.md`, `infra/CLAUDE.md`. Docs: `docs/` (architecture,
 development, deployment, operations, encryption, security, ADRs). CI/CD: `.github/workflows`.

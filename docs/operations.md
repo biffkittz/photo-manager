@@ -73,12 +73,28 @@ their next request.
 
 ## Container registry storage
 
-Every release pushes three new images (web, worker, migrator, roughly 100 MB each, plus SBOM and provenance
-records) to the private registry `cr<project><suffix>`, and nothing removes old ones. The Basic tier includes
-10 GiB; beyond that Azure bills extra storage (a few cents per GiB per month) instead of failing, so this is a
-cost and tidiness question, not an outage risk. An optional weekly clean-up (`az acr run --cmd "acr purge
---filter 'photo-web:.*' --ago 30d --keep 10 --untagged"`, one per repository) would keep the last 10 releases
-for rollbacks.
+Images live in the registry **`crloginappdemo7fyguj`** (`rg-loginapp-demo`), shared with the login app. Every
+release pushes three images there (`photo-web`, `photo-worker`, `photo-migrator`, roughly 100 MB each, plus SBOM
+and provenance records).
+
+A weekly clean-up keeps that bounded: the ACR task **`photo-manager-image-cleanup`** (created by
+`infra/bootstrap`) runs every Sunday at 03:00 UTC and
+
+- deletes this project's image tags that are older than **30 days**, but always keeps the **10 newest** of those
+  per repository, so recent releases stay available for rollback (tags younger than 30 days are never touched);
+- then deletes image data that no tag refers to any more. Anything a still-tagged image refers to (its
+  platform manifests, SBOM and provenance records) is kept;
+- only ever matches the three `photo-*` repositories (the repository filter must match the whole name); the
+  login app's images are never selected.
+
+```bash
+az acr task run  --registry crloginappdemo7fyguj --name photo-manager-image-cleanup     # run it now
+az acr task logs --registry crloginappdemo7fyguj --name photo-manager-image-cleanup     # what the last run deleted
+```
+
+To change the policy, edit `registry_cleanup_older_than_days` / `registry_cleanup_keep` in `infra/bootstrap`
+and apply it. To preview a change, set `registry_cleanup_dry_run = true` first: runs then only log what they
+would delete. `registry_cleanup_enabled = false` removes the task.
 
 ## Monitoring and alerting
 

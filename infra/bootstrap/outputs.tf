@@ -4,13 +4,13 @@ output "app_resource_group_name" {
 }
 
 output "container_registry_name" {
-  description = "Azure Container Registry name (input to environments/prod)."
-  value       = azurerm_container_registry.this.name
+  description = "The shared container registry (input to environments/prod)."
+  value       = var.container_registry_name
 }
 
 output "container_registry_login_server" {
   description = "Registry login server for docker push (GitHub variable ACR_LOGIN_SERVER)."
-  value       = azurerm_container_registry.this.login_server
+  value       = local.registry_login_server
 }
 
 output "state_backend" {
@@ -30,5 +30,12 @@ output "github_actions" {
     AZURE_SUBSCRIPTION_ID  = var.subscription_id
     AZURE_CLIENT_ID_DEPLOY = azurerm_user_assigned_identity.github_deploy.client_id
     AZURE_CLIENT_ID_PLAN   = azurerm_user_assigned_identity.github_plan.client_id
+    ACR_NAME               = var.container_registry_name
+    ACR_LOGIN_SERVER       = local.registry_login_server
   }
+}
+
+output "registry_cleanup_task" {
+  description = "Name of the weekly image clean-up task in the shared registry (null when disabled)."
+  value       = var.registry_cleanup_enabled ? azurerm_container_registry_task.image_cleanup[0].name : null
 }

@@ -50,7 +50,6 @@ Secrets are not Terraform inputs, except the Temporal Cloud API key the provider
 | [azurerm_role_assignment.telemetry](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment) | resource |
 | [azurerm_user_assigned_identity.app](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/user_assigned_identity) | resource |
 | [azurerm_client_config.current](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/data-sources/client_config) | data source |
-| [azurerm_container_registry.this](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/data-sources/container_registry) | data source |
 | [azurerm_resource_group.app](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/data-sources/resource_group) | data source |
 
 ## Inputs
@@ -62,7 +61,9 @@ Secrets are not Terraform inputs, except the Temporal Cloud API key the provider
 | subscription\_id | Azure subscription id. | `string` | n/a | yes |
 | admin\_ip\_ranges | Operator public IPs/CIDRs allowed to reach the Key Vaults (to set secrets). Empty = private endpoints only. | `list(string)` | `[]` | no |
 | cloudflare\_zone\_name | Cloudflare zone containing the hostname. | `string` | `"biffkittz.com"` | no |
-| container\_registry\_name | Registry created by infra/bootstrap; empty = cr<project><suffix>. | `string` | `""` | no |
+| container\_registry\_login\_server | Login server of the registry; empty means <name>.azurecr.io. Set it only if the registry uses a domain name label (login server with a hash suffix). | `string` | `""` | no |
+| container\_registry\_name | Existing container registry holding the images (shared with another project). | `string` | `"crloginappdemo7fyguj"` | no |
+| container\_registry\_resource\_group | Resource group of the existing container registry (same subscription). | `string` | `"rg-loginapp-demo"` | no |
 | custom\_domain | Public hostname of the site. | `string` | `"photo.biffkittz.com"` | no |
 | environment | Environment name (must match infra/bootstrap). | `string` | `"prod"` | no |
 | gemini\_model | Gemini model id (pinned). | `string` | `"gemini-3.8-flash"` | no |
@@ -72,7 +73,7 @@ Secrets are not Terraform inputs, except the Temporal Cloud API key the provider
 | log\_retention\_days | Log Analytics / Application Insights retention. | `number` | `30` | no |
 | manage\_dns | Create the Cloudflare records and the managed certificate for the custom domain. | `bool` | `true` | no |
 | manage\_temporal\_cloud | Manage the namespace and service accounts with the temporalcloud provider. | `bool` | `true` | no |
-| name\_suffix | Suffix for globally unique names; empty derives the same value infra/bootstrap uses. | `string` | `""` | no |
+| name\_suffix | Suffix for globally unique names (Key Vaults, storage account, PostgreSQL server); empty derives a stable one from the subscription id. | `string` | `""` | no |
 | postgres\_admin\_principals | Optional break-glass Entra administrators for PostgreSQL (the migrator identity is always one). | ```list(object({ object_id = string principal_name = string principal_type = string }))``` | `[]` | no |
 | postgres\_sku | PostgreSQL SKU. | `string` | `"B_Standard_B1ms"` | no |
 | postgres\_version | PostgreSQL major version. | `string` | `"17"` | no |

@@ -23,7 +23,7 @@ variable "environment" {
 }
 
 variable "name_suffix" {
-  description = "Suffix for globally unique names; empty derives the same value infra/bootstrap uses."
+  description = "Suffix for globally unique names (Key Vaults, storage account, PostgreSQL server); empty derives a stable one from the subscription id."
   type        = string
   default     = ""
 }
@@ -35,7 +35,24 @@ variable "resource_group_name" {
 }
 
 variable "container_registry_name" {
-  description = "Registry created by infra/bootstrap; empty = cr<project><suffix>."
+  description = "Existing container registry holding the images (shared with another project)."
+  type        = string
+  default     = "crloginappdemo7fyguj"
+
+  validation {
+    condition     = can(regex("^[a-zA-Z0-9]{5,50}$", var.container_registry_name))
+    error_message = "container_registry_name must be 5-50 letters or digits (an Azure Container Registry name)."
+  }
+}
+
+variable "container_registry_resource_group" {
+  description = "Resource group of the existing container registry (same subscription)."
+  type        = string
+  default     = "rg-loginapp-demo"
+}
+
+variable "container_registry_login_server" {
+  description = "Login server of the registry; empty means <name>.azurecr.io. Set it only if the registry uses a domain name label (login server with a hash suffix)."
   type        = string
   default     = ""
 }

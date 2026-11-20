@@ -1,4 +1,42 @@
-# Copy to terraform.tfvars (gitignored) and fill in.
-subscription_id = "00000000-0000-0000-0000-000000000000"
+# Example settings for infra/bootstrap. Copy to terraform.tfvars (gitignored) and adjust.
+#
+# Nothing here is secret. Uncommented lines are values you must set; commented lines show the default (or an
+# example) and when you might change it. All inputs are described in README.md in this directory.
+
+# --- Required ----------------------------------------------------------------------------------------------
+
+subscription_id = "00000000-0000-0000-0000-000000000000" # az account show --query id -o tsv
+
+# --- Naming (defaults; infra/environments/prod must use the same project and environment) ------------------
+
 # location          = "centralus"
-# github_repository = "biffkittz/photo-manager"
+# project           = "photo"
+# environment       = "prod"
+# github_repository = "biffkittz/photo-manager" # the repository whose workflows may sign in to Azure
+
+# --- Shared container registry (defaults) ------------------------------------------------------------------
+
+container_registry_name           = "crloginappdemo7fyguj"
+container_registry_resource_group = "rg-loginapp-demo"
+container_registry_login_server   = "crloginappdemo7fyguj-abcdef1234.azurecr.io" # only with a domain name label
+
+# Weekly clean-up of this project's images in that registry (docs/operations.md#container-registry-storage).
+# registry_cleanup_enabled         = true
+# registry_cleanup_older_than_days = 30   # tags older than this are candidates...
+# registry_cleanup_keep            = 10   # ...except the newest 10 of them per repository
+# registry_cleanup_dry_run         = true # set while trying new values: runs only log what they would delete
+
+# --- Shared Terraform state (defaults; must match the backend blocks in both versions.tf files) -------------
+
+# state_resource_group_name    = "rg-terraform-state"
+# state_storage_account_name   = "demonstration"
+# state_container_name         = "terraform"
+# state_blob_prefix            = "photo."
+# scope_state_access_to_prefix = true # false only if Azure rejects the photo.* condition (see infra/README.md#state)
+
+# --- Tags (added to every resource) ------------------------------------------------------------------------
+
+# tags = {
+#   owner         = "family"
+#   "cost-center" = "personal"
+# }

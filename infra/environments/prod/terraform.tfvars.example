@@ -1,13 +1,108 @@
-# Copy to terraform.tfvars (gitignored). Nothing here is secret, but it is personal configuration.
-subscription_id = "00000000-0000-0000-0000-000000000000"
-image_tag       = "sha-0000000" # the first image pushed by the deploy workflow
+# Example settings for infra/environments/prod. Copy to terraform.tfvars (gitignored) and adjust.
+#
+# Nothing here is secret, but it is personal configuration. Never put keys or passwords in this file: the
+# Temporal Cloud API key comes from TF_VAR_temporal_api_key and the Cloudflare token from CLOUDFLARE_API_TOKEN.
+#
+# Uncommented lines are values you must set or check. Commented lines show the default (or an example) and when
+# you might change it; uncomment only what you want to override. All inputs are described in README.md here.
 
+# --- Required ----------------------------------------------------------------------------------------------
+
+subscription_id = "3c3f379f-8161-4631-a30c-a3af82622a6a" # az account show --query id -o tsv
+
+# Tag printed by the Deploy workflow's "images only" run: "sha-" plus the first 12 characters of the commit.
+#image_tag = "sha-0123456789ab"
+
+# People allowed to sign in, by numeric GitHub id (ids never change; the login is only for display):
+#   curl -s https://api.github.com/users/<login> | jq .id
 github_users = [
-  { id = 1234567, login = "biffkittz", role = "Admin" },
+  { id = 6528701, login = "biffkittz", role = "Admin" }      # Admin: everything, including the Actions page
 ]
+# { id = 7654321, login = "family-member", role = "Member" }, # Member: browse, search, upload, download, edit descriptions
 
-# Your public IP, only while setting secrets with scripts/bootstrap-keyvault.sh (curl -s https://api.ipify.org).
-admin_ip_ranges            = []
-key_vault_admin_object_ids = [] # az ad signed-in-user show --query id -o tsv
+# Region of the existing namespace photo.joqqs, with its cloud prefix: Temporal Cloud UI > Namespaces > photo.
+# It must match exactly; a namespace cannot move.
+temporal_namespace_region = "aws-us-east-2"
 
-temporal_namespace_region = "aws-us-east-1" # from the Temporal Cloud UI (namespace photo.joqqs)
+# --- First deployment (docs/deployment.md, steps 4 to 7) ---------------------------------------------------
+
+# Step 4: create the apps without replicas (their secrets and database do not exist yet) and let yourself into
+# both Key Vaults to store the secrets in step 5.
+web_min_replicas           = 0
+worker_replicas            = 0
+admin_ip_ranges            = ["203.0.113.10/32"]                      # your public IP: curl -s https://api.ipify.org
+key_vault_admin_object_ids = ["11111111-2222-3333-4444-555555555555"] # az ad signed-in-user show --query id -o tsv
+
+# Step 7, after the secrets and the migration job: start the apps and close the Key Vaults again. These are
+# also the values for the TF_VARS_PROD GitHub variable.
+# web_min_replicas           = 1
+# worker_replicas            = 1
+# admin_ip_ranges            = []
+# key_vault_admin_object_ids = []
+
+# --- Shared container registry -----------------------------------------------------------------------------
+
+# The login app's registry, which also holds this project's photo-* images (these are the defaults).
+container_registry_name           = "crloginappdemo7fyguj"
+container_registry_resource_group = "rg-loginapp-demo"
+
+# Only if the registry uses a domain name label (its login server then has a hash suffix):
+# container_registry_login_server = "crloginappdemo7fyguj-abcdef1234.azurecr.io"
+
+# --- Naming and network (defaults; project and environment must match infra/bootstrap) ---------------------
+
+# location            = "centralus"
+# project             = "photo"
+# environment         = "prod"
+# resource_group_name = ""             # empty = rg-<project>-<environment>, created by infra/bootstrap
+# name_suffix         = ""             # empty = derived from the subscription id; e.g. "a1b2c3" to choose it
+# vnet_address_space  = "10.40.0.0/16" # change only if it overlaps a network you connect to
+
+# --- Database and logs -------------------------------------------------------------------------------------
+
+# postgres_version   = "17"
+# postgres_sku       = "B_Standard_B1ms" # e.g. "GP_Standard_D2ds_v5" for more headroom
+# log_retention_days = 30
+
+# Break-glass database administrators (docs/operations.md#break-glass-database-access); remove when done.
+# postgres_admin_principals = [
+#   { object_id = "11111111-2222-3333-4444-555555555555", principal_name = "you@example.com", principal_type = "User" },
+# ]
+
+# --- Scale -------------------------------------------------------------------------------------------------
+
+# web_max_replicas = 3
+
+# --- Archive (Wasabi) --------------------------------------------------------------------------------------
+
+# wasabi_service_url = "https://s3.us-east-2.wasabisys.com"
+# wasabi_region      = "us-east-2"
+# wasabi_bucket      = "photo-bk"
+
+# --- Gemini ------------------------------------------------------------------------------------------------
+
+# gemini_model               = "gemini-3.8-flash"
+# gemini_requests_per_second = 1 # across all workers; raise only if your Gemini quota allows
+
+# --- Custom domain (Cloudflare) ----------------------------------------------------------------------------
+
+# manage_dns           = true # false: create the DNS records and the certificate binding yourself
+# custom_domain        = "photo.biffkittz.com"
+# cloudflare_zone_name = "biffkittz.com"
+
+# --- Temporal Cloud ----------------------------------------------------------------------------------------
+
+# manage_temporal_cloud              = true
+# temporal_account_id                = "joqqs"
+# temporal_namespace_name            = "photo"
+# temporal_import_existing_namespace = true # adopt the existing namespace; false would create a new one
+# temporal_retention_days            = 30
+# temporal_grpc_endpoint             = "photo.joqqs.tmprl.cloud:7233"
+# temporal_api_key: never in this file. Use: export TF_VAR_temporal_api_key=... (or TEMPORAL_CLOUD_API_KEY)
+
+# --- Tags (added to every resource) ------------------------------------------------------------------------
+
+# tags = {
+#   owner         = "family"
+#   "cost-center" = "personal"
+# }

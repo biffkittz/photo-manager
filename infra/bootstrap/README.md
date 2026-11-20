@@ -26,7 +26,7 @@ get access to this project's `photo.*` blobs in the existing, shared Terraform s
 
 | Name | Type |
 |------|------|
-| [azurerm_container_registry.this](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/container_registry) | resource |
+| [azurerm_container_registry_task.image_cleanup](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/container_registry_task) | resource |
 | [azurerm_federated_identity_credential.github_deploy](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/federated_identity_credential) | resource |
 | [azurerm_federated_identity_credential.github_plan](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/federated_identity_credential) | resource |
 | [azurerm_resource_group.app](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/resource_group) | resource |
@@ -34,12 +34,16 @@ get access to this project's `photo.*` blobs in the existing, shared Terraform s
 | [azurerm_role_assignment.deploy_acr_push](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment) | resource |
 | [azurerm_role_assignment.deploy_contributor](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment) | resource |
 | [azurerm_role_assignment.deploy_rbac_admin](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment) | resource |
+| [azurerm_role_assignment.deploy_registry_rbac_admin](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment) | resource |
 | [azurerm_role_assignment.deploy_state](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment) | resource |
 | [azurerm_role_assignment.plan_reader](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment) | resource |
+| [azurerm_role_assignment.plan_registry_reader](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment) | resource |
 | [azurerm_role_assignment.plan_state](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment) | resource |
 | [azurerm_role_definition.terraform_planner](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_definition) | resource |
+| [azurerm_role_definition.terraform_planner_registry](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_definition) | resource |
 | [azurerm_user_assigned_identity.github_deploy](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/user_assigned_identity) | resource |
 | [azurerm_user_assigned_identity.github_plan](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/user_assigned_identity) | resource |
+| [azurerm_role_definition.acr_pull](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/data-sources/role_definition) | data source |
 | [azurerm_role_definition.assignable](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/data-sources/role_definition) | data source |
 
 ## Inputs
@@ -47,11 +51,17 @@ get access to this project's `photo.*` blobs in the existing, shared Terraform s
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
 | subscription\_id | Azure subscription that hosts Photo Manager. | `string` | n/a | yes |
+| container\_registry\_login\_server | Login server of the registry; empty means <name>.azurecr.io. Set it only if the registry uses a domain name label (login server with a hash suffix). | `string` | `""` | no |
+| container\_registry\_name | Existing container registry the images are pushed to (shared with another project). | `string` | `"crloginappdemo7fyguj"` | no |
+| container\_registry\_resource\_group | Resource group of the existing container registry (same subscription). | `string` | `"rg-loginapp-demo"` | no |
 | environment | Environment name (part of resource names). | `string` | `"prod"` | no |
 | github\_repository | GitHub repository (owner/name) whose Actions may sign in to Azure with OIDC. | `string` | `"biffkittz/photo-manager"` | no |
 | location | Azure region for all resources. | `string` | `"centralus"` | no |
-| name\_suffix | Suffix for globally unique names (storage, registry). Empty derives a stable one from the subscription id. | `string` | `""` | no |
 | project | Short project name used in resource names. | `string` | `"photo"` | no |
+| registry\_cleanup\_dry\_run | Only log what the clean-up would delete (az acr task logs); nothing is removed. | `bool` | `false` | no |
+| registry\_cleanup\_enabled | Run the weekly clean-up of this project's images (photo-web, photo-worker, photo-migrator) in the shared registry. | `bool` | `true` | no |
+| registry\_cleanup\_keep | Always keep this many of the newest candidate tags per repository (rollback targets). | `number` | `10` | no |
+| registry\_cleanup\_older\_than\_days | Image tags older than this many days are candidates for deletion. | `number` | `30` | no |
 | scope\_state\_access\_to\_prefix | Limit the CI identities' state access to blobs named state\_blob\_prefix* with an ABAC condition. Set false only if the condition is rejected for the state account. | `bool` | `true` | no |
 | state\_blob\_prefix | Prefix of this project's state blobs in the shared container; CI identities can only touch these. | `string` | `"photo."` | no |
 | state\_container\_name | Blob container holding the state files (must match the backend blocks). | `string` | `"terraform"` | no |
@@ -65,7 +75,8 @@ get access to this project's `photo.*` blobs in the existing, shared Terraform s
 |------|-------------|
 | app\_resource\_group\_name | Resource group for the application (input to environments/prod). |
 | container\_registry\_login\_server | Registry login server for docker push (GitHub variable ACR\_LOGIN\_SERVER). |
-| container\_registry\_name | Azure Container Registry name (input to environments/prod). |
+| container\_registry\_name | The shared container registry (input to environments/prod). |
 | github\_actions | Values for GitHub repository variables (not secrets). |
+| registry\_cleanup\_task | Name of the weekly image clean-up task in the shared registry (null when disabled). |
 | state\_backend | The state location the CI identities were granted access to (configured in each versions.tf). |
 <!-- END_TF_DOCS -->

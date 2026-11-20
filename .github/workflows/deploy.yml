@@ -48,7 +48,11 @@ jobs:
           client-id: ${{ vars.AZURE_CLIENT_ID_DEPLOY }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      - run: az acr login --name "${ACR%%.*}"
+      # The shared registry (crloginappdemo7fyguj); the deploy identity holds AcrPush on it.
+      - name: Sign in to the container registry
+        env:
+          ACR_NAME: ${{ vars.ACR_NAME }}
+        run: az acr login --name "${ACR_NAME:-${ACR%%.*}}"
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       # The license (a multi-line file) is handed to BuildKit as a secret file; it never enters an image layer.
       - name: Write ImageSharp license

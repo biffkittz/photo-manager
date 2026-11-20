@@ -23,7 +23,7 @@ flowchart LR
       kvk[[Key Vault: worker]]
       blob[(Blob storage<br/>staging / renditions /<br/>downloads / key ring)]
     end
-    acr[(Container Registry)]
+    acr[(Container Registry<br/>shared: crloginappdemo7fyguj)]
     appi[Application Insights<br/>+ Log Analytics]
   end
 

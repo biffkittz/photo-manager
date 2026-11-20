@@ -15,3 +15,4 @@ the decision, and the consequences we accepted. Superseded records stay, marked 
 | [0008](0008-ef-core-lts.md) | EF Core 10 (LTS) on .NET 11 | Accepted |
 | [0009](0009-terraform-state.md) | Terraform state in the existing shared state account, CI scoped to `photo.*` | Accepted |
 | [0010](0010-duplicates.md) | Byte-identical photos are hidden, never deleted | Accepted |
+| [0011](0011-shared-container-registry.md) | Images in the existing shared container registry | Accepted |

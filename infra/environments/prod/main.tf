@@ -4,8 +4,12 @@ locals {
   name                = "${var.project}-${var.environment}"
   suffix              = var.name_suffix != "" ? var.name_suffix : substr(sha1("${var.subscription_id}-${var.project}"), 0, 6)
   resource_group_name = var.resource_group_name != "" ? var.resource_group_name : "rg-${local.name}"
-  registry_name       = var.container_registry_name != "" ? var.container_registry_name : "cr${var.project}${local.suffix}"
-  temporal_namespace  = "${var.temporal_namespace_name}.${var.temporal_account_id}"
+
+  # The existing, shared container registry, referenced by name: a data source would copy its admin password
+  # (if the admin user is enabled) into this configuration's state.
+  registry_id           = "/subscriptions/${var.subscription_id}/resourceGroups/${var.container_registry_resource_group}/providers/Microsoft.ContainerRegistry/registries/${var.container_registry_name}"
+  registry_login_server = var.container_registry_login_server != "" ? var.container_registry_login_server : "${lower(var.container_registry_name)}.azurecr.io"
+  temporal_namespace    = "${var.temporal_namespace_name}.${var.temporal_account_id}"
   tags = merge(var.tags, {
     project     = var.project
     environment = var.environment
@@ -14,7 +18,7 @@ locals {
 
   images = {
     for target in ["web", "worker", "migrator"] :
-    target => "${data.azurerm_container_registry.this.login_server}/photo-${target}:${var.image_tag}"
+    target => "${local.registry_login_server}/photo-${target}:${var.image_tag}"
   }
 
   # Passwordless connections: the username is the identity's PostgreSQL role, the password an Entra token.
@@ -49,11 +53,6 @@ data "azurerm_resource_group" "app" {
   name = local.resource_group_name
 }
 
-data "azurerm_container_registry" "this" {
-  name                = local.registry_name
-  resource_group_name = data.azurerm_resource_group.app.name
-}
-
 # ---------------------------------------------------------------------------------------------------
 # Identities: one per tier, so each gets only the rights its tier needs.
 # ---------------------------------------------------------------------------------------------------
@@ -65,9 +64,11 @@ resource "azurerm_user_assigned_identity" "app" {
   tags                = local.tags
 }
 
+# Pull access to the shared registry (the deploy identity may grant AcrPull there, and only that; see
+# infra/bootstrap).
 resource "azurerm_role_assignment" "acr_pull" {
   for_each             = azurerm_user_assigned_identity.app
-  scope                = data.azurerm_container_registry.this.id
+  scope                = local.registry_id
   role_definition_name = "AcrPull"
   principal_id         = each.value.principal_id
   principal_type       = "ServicePrincipal"
@@ -201,7 +202,7 @@ module "web_app" {
   resource_group_name = data.azurerm_resource_group.app.name
   environment_id      = module.container_apps_environment.id
   identity_id         = azurerm_user_assigned_identity.app["web"].id
-  registry_server     = data.azurerm_container_registry.this.login_server
+  registry_server     = local.registry_login_server
   image               = local.images["web"]
   cpu                 = 0.5
   memory              = "1Gi"
@@ -227,7 +228,7 @@ module "worker_app" {
   resource_group_name              = data.azurerm_resource_group.app.name
   environment_id                   = module.container_apps_environment.id
   identity_id                      = azurerm_user_assigned_identity.app["worker"].id
-  registry_server                  = data.azurerm_container_registry.this.login_server
+  registry_server                  = local.registry_login_server
   image                            = local.images["worker"]
   cpu                              = 1
   memory                           = "2Gi"
@@ -258,7 +259,7 @@ module "migration_job" {
   location            = var.location
   environment_id      = module.container_apps_environment.id
   identity_id         = azurerm_user_assigned_identity.app["migrator"].id
-  registry_server     = data.azurerm_container_registry.this.login_server
+  registry_server     = local.registry_login_server
   image               = local.images["migrator"]
   tags                = local.tags
 
