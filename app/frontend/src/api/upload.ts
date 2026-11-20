@@ -14,21 +14,24 @@ interface UploadResult {
 
 /**
  * Uploads one file with XMLHttpRequest, because fetch() cannot report upload progress. One file per request
- * lets the UI show per-file progress and retry individual failures.
+ * lets the UI show per-file progress and retry individual failures. With `describe` false the photo is stored
+ * without an AI description (it can be described later), so the upload does not wait for Gemini.
  */
 export async function uploadFile(
   file: File,
   batchId: string,
   onProgress: (fraction: number) => void,
   signal?: AbortSignal,
+  describe = true,
 ): Promise<UploadAccepted> {
-  let result = await send(file, batchId, onProgress, signal)
+  const url = `/api/uploads?batchId=${encodeURIComponent(batchId)}${describe ? '' : '&describe=false'}`
+  let result = await send(file, url, onProgress, signal)
   if (result.status === 403 && isCsrfProblem(result.response)) {
     // Stale anti-CSRF token (the API never reads the file without a valid one): fetch a fresh token and send the
     // file once more.
     await refreshCsrfToken()
     onProgress(0)
-    result = await send(file, batchId, onProgress, signal)
+    result = await send(file, url, onProgress, signal)
   }
 
   if (result.status >= 200 && result.status < 300) {
@@ -50,7 +53,7 @@ export async function uploadFile(
 
 function send(
   file: File,
-  batchId: string,
+  url: string,
   onProgress: (fraction: number) => void,
   signal?: AbortSignal,
 ): Promise<UploadResult> {
@@ -61,7 +64,7 @@ function send(
     }
 
     const xhr = new XMLHttpRequest()
-    xhr.open('POST', `/api/uploads?batchId=${encodeURIComponent(batchId)}`)
+    xhr.open('POST', url)
     xhr.responseType = 'json'
     xhr.setRequestHeader('Accept', 'application/json')
     const token = currentCsrfToken()

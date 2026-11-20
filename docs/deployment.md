@@ -278,12 +278,12 @@ workstation again, keep your local file identical to `TF_VARS_PROD`.
 
 ```mermaid
 flowchart LR
-  pr[Pull request] --> ci[CI: build, tests, E2E, image scan, gitleaks, terraform validate] --> codeql[CodeQL]
-  pr --> plan[Terraform plan (read-only identity, -lock=false)]
-  main[Merge to main] --> ci2[CI] --> newest[Still the newest commit on main?] --> deploy{{Deploy: approval}}
-  deploy --> push[Build release images + SBOM/provenance, push to ACR]
-  push --> migrate[Migration job] --> worker[Roll out worker, wait until healthy] --> web[Roll out web, wait until healthy] --> smoke[Smoke test]
-  main --> planmain[Terraform plan, shown in the run summary] --> apply{{Terraform apply: approval, only the same plan}}
+  pr["Pull request"] --> ci["CI: build, tests, E2E, image scan, gitleaks, terraform validate"] --> codeql["CodeQL"]
+  pr --> plan["Terraform plan (read-only identity, -lock=false)"]
+  main["Merge to main"] --> ci2["CI"] --> newest["Still the newest commit on main?"] --> deploy{{"Deploy: approval"}}
+  deploy --> push["Build release images + SBOM/provenance, push to ACR"]
+  push --> migrate["Migration job"] --> worker["Roll out worker, wait until healthy"] --> web["Roll out web, wait until healthy"] --> smoke["Smoke test"]
+  main --> planmain["Terraform plan, shown in the run summary"] --> apply{{"Terraform apply: approval, only the same plan"}}
 ```
 
 - Images are tagged `sha-<commit>`; Terraform ignores image changes, so infrastructure applies never roll

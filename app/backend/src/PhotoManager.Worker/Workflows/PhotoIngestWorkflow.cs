@@ -56,21 +56,28 @@ public sealed class PhotoIngestWorkflow
 
         // Everything read from staging from here on must hash to what was inspected (the web tier can write staging).
         var staged = new StagedUploadInput(photoId, inspection.Sha256);
-        var describeTask = Workflow.ExecuteActivityAsync(
-            (DescribeActivities a) => a.DescribeStagedUploadAsync(staged),
-            ActivityProfiles.Describe(DescribeBudget));
+        // Skipped when the uploader switched AI descriptions off: the upload is then archived without waiting for
+        // Gemini, and the photo can be described later.
+        var describeTask = input.SkipDescription
+            ? null
+            : Workflow.ExecuteActivityAsync(
+                (DescribeActivities a) => a.DescribeStagedUploadAsync(staged),
+                ActivityProfiles.Describe(DescribeBudget));
         var renditionTask = Workflow.ExecuteActivityAsync(
             (RenditionActivities a) => a.CreateRenditionsFromStagingAsync(staged),
             ActivityProfiles.Renditions());
 
         DescribeResult? description = null;
-        try
+        if (describeTask is not null)
         {
-            description = await describeTask;
-        }
-        catch (ActivityFailureException ex)
-        {
-            Workflow.Logger.LogWarning(ex, "Describing photo {PhotoId} failed; continuing without a description", photoId);
+            try
+            {
+                description = await describeTask;
+            }
+            catch (ActivityFailureException ex)
+            {
+                Workflow.Logger.LogWarning(ex, "Describing photo {PhotoId} failed; continuing without a description", photoId);
+            }
         }
 
         try
@@ -106,7 +113,7 @@ public sealed class PhotoIngestWorkflow
         // The original is safely archived at this point; recording that must not give up while the database is
         // unavailable, or the photo would stay "Processing" forever.
         return await Workflow.ExecuteActivityAsync(
-            (IngestActivities a) => a.CompleteIngestAsync(new CompleteIngestInput(photoId, archived, description)),
+            (IngestActivities a) => a.CompleteIngestAsync(new CompleteIngestInput(photoId, archived, description, input.SkipDescription)),
             ActivityProfiles.DatabaseUntilDone());
     }
 

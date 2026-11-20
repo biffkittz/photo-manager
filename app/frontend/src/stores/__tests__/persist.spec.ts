@@ -67,6 +67,7 @@ describe('persist plugin', () => {
       expect(JSON.parse(storage.getItem(key)!)).toEqual({
         density: 'comfortable',
         sort: 'taken',
+        describeUploads: true,
       }),
     )
   })
@@ -81,6 +82,16 @@ describe('persist plugin', () => {
 
     expect(preferences.density).toBe('comfortable')
     expect(preferences.sort).toBe('uploaded')
+  })
+
+  it('remembers the upload description choice, and only as a boolean', () => {
+    storage.setItem(key, JSON.stringify({ describeUploads: false }))
+    freshPinia()
+    expect(usePreferencesStore().describeUploads).toBe(false)
+
+    storage.setItem(key, JSON.stringify({ describeUploads: 'no' }))
+    freshPinia()
+    expect(usePreferencesStore().describeUploads).toBe(true)
   })
 
   it('drops unreadable stored data', () => {

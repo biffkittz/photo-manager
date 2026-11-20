@@ -208,7 +208,19 @@ az monitor log-analytics query -w "$ws" --timespan PT6H -o table --analytics-que
 `GeminiTransient` means Gemini rate-limited the request (429) or was overloaded (503, "This model is currently
 experiencing high demand"). Those are retried with growing pauses (up to 8 attempts); photos still without a
 description afterwards are picked up by the next **Generate missing descriptions** run. If it persists for hours,
-run the job later, or check your Gemini quota.
+run the job later, or check your Gemini quota. To see how much is getting through (each success logs
+`Gemini described a photo in ... s`):
+
+```bash
+az monitor log-analytics query -w "$ws" --timespan PT3H -o table --analytics-query '
+  ContainerAppConsoleLogs_CL
+  | where ContainerAppName_s == "ca-photo-worker"
+  | summarize described = countif(Log_s has "Gemini described a photo"),
+              overloaded = countif(Log_s has "Gemini returned HTTP 503"),
+              rateLimited = countif(Log_s has "Gemini returned HTTP 429")
+      by bin(TimeGenerated, 15m)
+  | order by TimeGenerated asc'
+```
 
 ## Error reporting
 

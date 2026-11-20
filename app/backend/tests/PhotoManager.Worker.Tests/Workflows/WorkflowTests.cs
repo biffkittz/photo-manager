@@ -96,6 +96,19 @@ public sealed class WorkflowTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Upload_without_an_ai_description_is_archived_without_asking_gemini()
+    {
+        var fakes = new FakeActivities();
+        var result = await RunAsync(fakes, (PhotoIngestWorkflow wf) => wf.RunAsync(new PhotoIngestInput(Guid.NewGuid(), SkipDescription: true)));
+
+        Assert.Equal(PhotoStatus.Ready, result);
+        Assert.DoesNotContain("describe", fakes.Calls);
+        Assert.Contains("render", fakes.Calls);
+        Assert.Null(fakes.ArchivedWith!.Description);
+        Assert.True(fakes.Completed!.DescriptionSkipped); // left "not started", not "failed"
+    }
+
+    [Fact]
     public async Task Upload_that_cannot_be_fully_decoded_is_rejected_not_archived()
     {
         // Inspection only reads headers; the renderer's full decode is what catches corrupt or disguised files.

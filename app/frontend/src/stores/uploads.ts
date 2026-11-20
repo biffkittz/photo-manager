@@ -31,6 +31,8 @@ export interface UploadItem {
   message: string | null
   description: string | null
   renditionVersion: number
+  /** Whether this photo is described by AI during processing (decided when it was queued). */
+  describe: boolean
 }
 
 /** Validates a file before upload; returns a user-facing reason, or null when acceptable. */
@@ -75,7 +77,8 @@ export const useUploadsStore = defineStore('uploads', () => {
     ).length,
   }))
 
-  function enqueue(selected: Iterable<File>): void {
+  /** Queues files; `describe` false stores them without an AI description (they can be described later). */
+  function enqueue(selected: Iterable<File>, describe = true): void {
     for (const file of selected) {
       const localId = crypto.randomUUID()
       const rejection = validateFile(file)
@@ -89,6 +92,7 @@ export const useUploadsStore = defineStore('uploads', () => {
         message: rejection,
         description: null,
         renditionVersion: 0,
+        describe,
       }
       order.value.push(localId)
       if (!rejection) {
@@ -129,11 +133,12 @@ export const useUploadsStore = defineStore('uploads', () => {
         batchId.value,
         (p) => (item.progress = p),
         controller.signal,
+        item.describe,
       )
       item.photoId = accepted.photoId
       item.progress = 1
       item.phase = 'processing'
-      item.message = 'Encrypting and describing...'
+      item.message = item.describe ? 'Encrypting and describing...' : 'Encrypting...'
       files.delete(localId)
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {

@@ -35,7 +35,7 @@ public static class UploadEndpoints
     /// Reads the multipart body manually (no IFormFile) so the file streams straight into encryption without
     /// being buffered to a temp file. CSRF is enforced by the /api group's antiforgery filter.
     /// </summary>
-    private static async Task<IResult> UploadAsync(HttpContext http, UploadService service, Guid? batchId, CancellationToken ct)
+    private static async Task<IResult> UploadAsync(HttpContext http, UploadService service, Guid? batchId, bool? describe, CancellationToken ct)
     {
         if (!MediaTypeHeaderValue.TryParse(http.Request.ContentType, out var mediaType)
             || !string.Equals(mediaType.MediaType.Value, "multipart/form-data", StringComparison.OrdinalIgnoreCase))
@@ -68,7 +68,8 @@ public static class UploadEndpoints
                     && string.Equals(disposition.Name.Value, "file", StringComparison.Ordinal))
                 {
                     var fileName = disposition.FileNameStar.HasValue ? disposition.FileNameStar.Value : disposition.FileName.Value;
-                    var outcome = await service.StageAsync(section.Body, fileName, batchId, http.User.Login(), http.User.GitHubId(), ct);
+                    // ?describe=false: the uploader switched AI descriptions off for this upload (default: describe).
+                    var outcome = await service.StageAsync(section.Body, fileName, batchId, http.User.Login(), http.User.GitHubId(), describe ?? true, ct);
                     return outcome.Problem ?? TypedResults.Accepted((string?)null, outcome.Accepted);
                 }
             }

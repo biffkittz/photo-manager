@@ -17,6 +17,7 @@ vi.mock('@/api/upload', () => ({
 }))
 
 const { useUploadsStore, validateFile, MAX_UPLOAD_BYTES } = await import('../uploads')
+const { uploadFile } = await import('@/api/upload')
 
 function file(name: string, size = 1000, type = 'image/jpeg'): File {
   const f = new File(['x'], name, { type })
@@ -46,6 +47,31 @@ describe('uploads store', () => {
   beforeEach(() => {
     pending.length = 0
     setActivePinia(createPinia())
+  })
+
+  it('sends each file with the description choice it was queued with', async () => {
+    const store = useUploadsStore()
+    store.enqueue([file('quiet.jpg')], false)
+
+    expect(uploadFile).toHaveBeenLastCalledWith(
+      expect.any(File),
+      store.batchId,
+      expect.any(Function),
+      expect.any(AbortSignal),
+      false,
+    )
+    pending.shift()!.resolve({ photoId: 'p1', status: 'Queued' })
+    await vi.waitFor(() => expect(store.items[0]!.phase).toBe('processing'))
+    expect(store.items[0]!.message).toBe('Encrypting...')
+
+    store.enqueue([file('described.jpg')])
+    expect(uploadFile).toHaveBeenLastCalledWith(
+      expect.any(File),
+      store.batchId,
+      expect.any(Function),
+      expect.any(AbortSignal),
+      true,
+    )
   })
 
   it('reset cancels transfers and forgets the queue (the session ended)', () => {

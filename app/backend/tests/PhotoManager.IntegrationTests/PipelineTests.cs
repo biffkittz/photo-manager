@@ -54,6 +54,21 @@ public sealed class PipelineTests(LocalStackFixture stack)
     }
 
     [Fact]
+    public async Task Upload_without_an_ai_description_is_archived_and_left_for_later()
+    {
+        Assert.SkipUnless(LocalStackFixture.Enabled, "Set PHOTOMANAGER_INTEGRATION=1 with docker compose running.");
+        var photoId = await StageUploadAsync(TestImages.Jpeg(400, 300), "no-ai.jpg");
+
+        await stack.Workflows.StartIngestAsync(photoId, skipDescription: true);
+        var photo = await stack.WaitForAsync(db => db.Photos.AsNoTracking().SingleAsync(p => p.Id == photoId), p => p.Status is not (PhotoStatus.Queued or PhotoStatus.Processing));
+
+        Assert.Equal(PhotoStatus.Ready, photo.Status);
+        Assert.Equal(ProcessingState.Ready, photo.RenditionState);
+        Assert.Null(photo.Description);
+        Assert.Equal(ProcessingState.NotStarted, photo.DescriptionState); // picked up by "Generate missing descriptions"
+    }
+
+    [Fact]
     public async Task Duplicate_and_corrupt_uploads_are_rejected_without_archiving()
     {
         Assert.SkipUnless(LocalStackFixture.Enabled, "Set PHOTOMANAGER_INTEGRATION=1 with docker compose running.");

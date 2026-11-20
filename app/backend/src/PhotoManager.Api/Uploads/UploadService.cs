@@ -36,9 +36,11 @@ public sealed class UploadService(
     /// <param name="batchId">Client-generated batch id grouping one upload session.</param>
     /// <param name="uploadedBy">GitHub login of the uploader (display).</param>
     /// <param name="uploadedById">Numeric GitHub id of the uploader (ownership).</param>
+    /// <param name="describe">False when the uploader switched AI descriptions off: the photo is archived without
+    /// waiting for Gemini and left for a later description.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The outcome.</returns>
-    public async Task<UploadOutcome> StageAsync(Stream content, string? clientFileName, Guid? batchId, string uploadedBy, long uploadedById, CancellationToken cancellationToken)
+    public async Task<UploadOutcome> StageAsync(Stream content, string? clientFileName, Guid? batchId, string uploadedBy, long uploadedById, bool describe, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(content);
 
@@ -96,7 +98,7 @@ public sealed class UploadService(
                 UploadedBy = uploadedBy,
                 UploadedById = uploadedById,
                 UploadBatchId = batchId,
-                DescriptionState = ProcessingState.Pending,
+                DescriptionState = describe ? ProcessingState.Pending : ProcessingState.NotStarted,
                 RenditionState = ProcessingState.Pending,
             };
             db.Photos.Add(photo);
@@ -117,11 +119,11 @@ public sealed class UploadService(
             throw;
         }
 
-        await audit.WriteAsync("photo.upload", photoId.ToString(), new { size, type = detected.ContentType });
+        await audit.WriteAsync("photo.upload", photoId.ToString(), new { size, type = detected.ContentType, describe });
 
         try
         {
-            await workflows.StartIngestAsync(photoId);
+            await workflows.StartIngestAsync(photoId, skipDescription: !describe);
         }
         catch (Exception ex) when (TemporalUnavailable.Matches(ex))
         {
@@ -168,7 +170,8 @@ public sealed class UploadService(
 
         try
         {
-            await workflows.StartIngestAsync(photoId);
+            // A retry keeps the uploader's choice: photos uploaded without a description are "not started".
+            await workflows.StartIngestAsync(photoId, skipDescription: photo.DescriptionState == ProcessingState.NotStarted);
         }
         catch (Exception ex) when (TemporalUnavailable.Matches(ex))
         {

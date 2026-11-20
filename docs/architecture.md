@@ -103,7 +103,11 @@ sequenceDiagram
 ```
 
 The description is generated **before** archive encryption because it is sealed into the encrypted file's
-metadata, which makes the bucket self-describing if the database is ever lost.
+metadata, which makes the bucket self-describing if the database is ever lost. So ingest waits for Gemini (up to
+12 minutes of retries) and, if it still fails, archives the photo without a description. Uploaders can switch
+descriptions off on the Uploads page (`?describe=false`, remembered per browser): ingest then skips Gemini and
+leaves the photo "not started", to be described later with the photo's *Describe with AI* button or **Generate
+missing descriptions**. A description added later is stored in the database only, not sealed in the file.
 
 ### Viewing
 

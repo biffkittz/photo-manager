@@ -20,7 +20,8 @@ public sealed class DescribeActivities(
     PhotoImageProcessor processor,
     IPhotoDescriber describer,
     IOptions<GeminiOptions> gemini,
-    TimeProvider time)
+    TimeProvider time,
+    ILogger<DescribeActivities> logger)
 {
     /// <summary>Describes a staged upload before it is encrypted into the archive.</summary>
     /// <param name="input">The photo and the hash its inspection computed.</param>
@@ -97,7 +98,15 @@ public sealed class DescribeActivities(
     private async Task<DescribeResult> DescribeAsync(LoadedImage image, CancellationToken cancellationToken)
     {
         var jpeg = await processor.CreateAiInputAsync(image.Content, gemini.Value.MaxImageDimension, cancellationToken);
+        var started = time.GetTimestamp();
         var description = await describer.DescribeAsync(jpeg, cancellationToken);
+
+        // Failures are logged by GeminiPhotoDescriber; logging successes too makes Gemini's success rate visible
+        // (docs/operations.md). Never the description itself.
+        logger.LogInformation(
+            "Gemini described a photo in {Seconds:F1} s with {Model}",
+            time.GetElapsedTime(started).TotalSeconds,
+            description.Model);
         return new DescribeResult(description.Description, description.Tags, description.Model);
     }
 }

@@ -115,6 +115,32 @@ public sealed class ApiTests(ApiFactory factory)
     }
 
     [Fact]
+    public async Task Uploads_can_skip_the_ai_description_and_keep_that_choice_on_retry()
+    {
+        var client = await ApiFactory.WithCsrfAsync(factory.ClientFor(ApiFactory.MemberId));
+        byte[] jpeg = [0xFF, 0xD8, 0xFF, 0xE0, .. System.Security.Cryptography.RandomNumberGenerator.GetBytes(5000)];
+
+        using var accepted = await client.PostAsync("/api/uploads?describe=false", FileContent("no-ai.jpg", jpeg), Ct);
+
+        Assert.Equal(HttpStatusCode.Accepted, accepted.StatusCode);
+        var photoId = (await accepted.Content.ReadFromJsonAsync<UploadAccepted>(Json, Ct))!.PhotoId;
+        Assert.Equal(ProcessingState.NotStarted, await factory.WithDbAsync(db => db.Photos.AsNoTracking().Where(p => p.Id == photoId).Select(p => p.DescriptionState).SingleAsync(Ct)));
+        await factory.Temporal.Received(1).StartWorkflowAsync(
+            WorkflowTypes.PhotoIngest,
+            Arg.Is<IReadOnlyCollection<object?>>(a => a.OfType<PhotoIngestInput>().Any(i => i.PhotoId == photoId && i.SkipDescription)),
+            Arg.Any<WorkflowOptions>());
+
+        // A retry after a failed ingest makes the same choice.
+        await factory.WithDbAsync(db => db.Photos.Where(p => p.Id == photoId).ExecuteUpdateAsync(s => s.SetProperty(p => p.Status, PhotoStatus.Failed), Ct));
+        using var retried = await client.PostAsync($"/api/uploads/{photoId}/retry", null, Ct);
+        Assert.Equal(HttpStatusCode.Accepted, retried.StatusCode);
+        await factory.Temporal.Received(2).StartWorkflowAsync(
+            WorkflowTypes.PhotoIngest,
+            Arg.Is<IReadOnlyCollection<object?>>(a => a.OfType<PhotoIngestInput>().Any(i => i.PhotoId == photoId && i.SkipDescription)),
+            Arg.Any<WorkflowOptions>());
+    }
+
+    [Fact]
     public async Task Upload_sniffs_content_enforces_size_and_stages_only_ciphertext()
     {
         var client = await ApiFactory.WithCsrfAsync(factory.ClientFor(ApiFactory.MemberId));
@@ -163,7 +189,7 @@ public sealed class ApiTests(ApiFactory factory)
         byte[] failingJpeg = [0xFF, 0xD8, 0xFF, 0xE0, .. System.Security.Cryptography.RandomNumberGenerator.GetBytes(2000)];
         using var stream = new MemoryStream(failingJpeg);
         await Assert.ThrowsAsync<DbUpdateException>(() =>
-            uploader.StageAsync(stream, "valid.jpg", null, new string('u', 150), ApiFactory.MemberId, Ct));
+            uploader.StageAsync(stream, "valid.jpg", null, new string('u', 150), ApiFactory.MemberId, describe: true, Ct));
         var stagingCountAfter = factory.Blobs.Blobs.Keys.Count(k => k.Area == BlobArea.Staging);
         Assert.Equal(stagingCountBefore, stagingCountAfter);
     }

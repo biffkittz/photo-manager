@@ -178,7 +178,9 @@ public sealed class IngestActivities(
         }
         else
         {
-            photo.DescriptionState = ProcessingState.Failed;
+            // Skipped: not attempted, so not a failure; "Generate missing descriptions" or the photo's Describe button
+            // can describe it later (that description is then stored in the database only, not sealed in the file).
+            photo.DescriptionState = input.DescriptionSkipped ? ProcessingState.NotStarted : ProcessingState.Failed;
         }
 
         var status = PhotoStatus.Ready;

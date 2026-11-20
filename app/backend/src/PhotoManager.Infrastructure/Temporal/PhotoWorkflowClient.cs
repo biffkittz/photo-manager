@@ -27,11 +27,12 @@ public sealed class PhotoWorkflowClient(ITemporalClient client)
     /// new one (a retry after a failure); the workflow itself never downgrades a photo that is already ready.
     /// </summary>
     /// <param name="photoId">The photo id.</param>
+    /// <param name="skipDescription">True to archive the photo without an AI description (it can be described later).</param>
     /// <returns>A task that completes when the start is acknowledged.</returns>
-    public Task StartIngestAsync(Guid photoId) =>
+    public Task StartIngestAsync(Guid photoId, bool skipDescription = false) =>
         StartAsync(
             WorkflowTypes.PhotoIngest,
-            new PhotoIngestInput(photoId),
+            new PhotoIngestInput(photoId, skipDescription),
             WorkflowIds.PhotoIngest(photoId),
             TaskQueues.Ingest,
             WorkflowIdReusePolicy.AllowDuplicate,
