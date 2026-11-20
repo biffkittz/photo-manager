@@ -134,7 +134,7 @@ rule is what actually enforces it.
 | Variable | `ACR_NAME`, `ACR_LOGIN_SERVER` | same output: `crloginappdemo7fyguj` and `crloginappdemo7fyguj.azurecr.io` |
 | Variable | `AZURE_RESOURCE_GROUP` | `rg-photo-prod` |
 | Variable | `SITE_HOSTNAME` | `photo.biffkittz.com` |
-| Variable | `TF_VARS_PROD` | **in step 7**, not now: the final `infra/environments/prod/terraform.tfvars` |
+| Variable | `TF_VARS_PROD` | **in step 7**, not now (and no placeholder: it is used as a Terraform file): the final `infra/environments/prod/terraform.tfvars` |
 | Repository secret | `CLOUDFLARE_API_TOKEN_READONLY` | Cloudflare token with *Zone > DNS > Read* on the zone (plans) |
 | Repository secret | `TEMPORAL_CLOUD_API_KEY_READONLY` | API key of a Temporal Cloud service account with the account role **Read** (plans) |
 | **production** environment secret | `CLOUDFLARE_API_TOKEN` | the DNS-edit token (apply only) |
@@ -235,8 +235,13 @@ want to keep Key Vault admin rights), then apply again from the same shell:
 terraform -chdir=infra/environments/prod apply
 ```
 
-Now create the `TF_VARS_PROD` GitHub variable (step 2) with the contents of this final `terraform.tfvars`. It
-holds no secrets (keys come from environment variables) and must not contain settings the configuration no
+Now create the `TF_VARS_PROD` GitHub variable (step 2) with the contents of this final `terraform.tfvars`:
+
+```bash
+gh variable set TF_VARS_PROD < infra/environments/prod/terraform.tfvars
+```
+
+It holds no secrets (keys come from environment variables) and must not contain settings the configuration no
 longer has, such as `container_registry_resource_group` (Terraform warns about undeclared variables). From now
 on, infrastructure changes go through pull requests and the *Terraform* workflow; if you ever apply from your
 workstation again, keep your local file identical to `TF_VARS_PROD`.

@@ -64,7 +64,13 @@ jobs:
       - name: Variables (from a repository variable; nothing in it is secret)
         env:
           TFVARS: ${{ vars.TF_VARS_PROD }}
-        run: printf '%s\n' "$TFVARS" > terraform.tfvars
+        run: |
+          printf '%s\n' "$TFVARS" > terraform.tfvars
+          # A malformed value would otherwise fail later, in terraform init, with a bare parse error.
+          if ! terraform fmt -write=false terraform.tfvars >/dev/null 2>&1; then
+            echo "::error::TF_VARS_PROD is not valid Terraform syntax. It must hold the contents of your final infra/environments/prod/terraform.tfvars (docs/deployment.md, step 7)."
+            exit 1
+          fi
       - name: Check GitHub configuration
         env:
           AZURE_CLIENT_ID_PLAN: ${{ vars.AZURE_CLIENT_ID_PLAN }}
@@ -110,7 +116,13 @@ jobs:
       - name: Variables
         env:
           TFVARS: ${{ vars.TF_VARS_PROD }}
-        run: printf '%s\n' "$TFVARS" > terraform.tfvars
+        run: |
+          printf '%s\n' "$TFVARS" > terraform.tfvars
+          # A malformed value would otherwise fail later, in terraform init, with a bare parse error.
+          if ! terraform fmt -write=false terraform.tfvars >/dev/null 2>&1; then
+            echo "::error::TF_VARS_PROD is not valid Terraform syntax. It must hold the contents of your final infra/environments/prod/terraform.tfvars (docs/deployment.md, step 7)."
+            exit 1
+          fi
       - name: Check GitHub configuration
         env:
           AZURE_CLIENT_ID_PLAN: ${{ vars.AZURE_CLIENT_ID_PLAN }}
@@ -155,7 +167,13 @@ jobs:
       - name: Variables
         env:
           TFVARS: ${{ vars.TF_VARS_PROD }}
-        run: printf '%s\n' "$TFVARS" > terraform.tfvars
+        run: |
+          printf '%s\n' "$TFVARS" > terraform.tfvars
+          # A malformed value would otherwise fail later, in terraform init, with a bare parse error.
+          if ! terraform fmt -write=false terraform.tfvars >/dev/null 2>&1; then
+            echo "::error::TF_VARS_PROD is not valid Terraform syntax. It must hold the contents of your final infra/environments/prod/terraform.tfvars (docs/deployment.md, step 7)."
+            exit 1
+          fi
       - name: Check GitHub configuration
         env:
           AZURE_CLIENT_ID_DEPLOY: ${{ vars.AZURE_CLIENT_ID_DEPLOY }}
