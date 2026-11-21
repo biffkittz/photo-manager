@@ -121,9 +121,9 @@ public sealed class DownloadActivities(
             download.Status = DownloadStatus.Ready;
             download.BlobName = blobName;
             download.SizeBytes = plaintextLength;
-            download.FileName = single
-                ? photos[0].OriginalFileName
-                : string.Create(CultureInfo.InvariantCulture, $"photos-{now:yyyyMMdd-HHmmss}.zip");
+            // A ZIP keeps the name it was requested with (the album's, or a dated "photos-..." name); the web tier
+            // sanitizes it again when it serves the file.
+            download.FileName = single ? photos[0].OriginalFileName : download.FileName;
             download.ContentType = single ? photos[0].ContentType : "application/zip";
             download.SkippedCount = download.PhotoIds.Count - photos.Count;
             download.ExpiresAt = now + options.Value.DownloadLifetime;

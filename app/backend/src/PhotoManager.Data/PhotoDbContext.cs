@@ -28,6 +28,12 @@ public sealed class PhotoDbContext(DbContextOptions<PhotoDbContext> options, Tim
     /// <summary>Gets the people invited from the People page (they sign in with Google).</summary>
     public DbSet<FamilyMember> Members => Set<FamilyMember>();
 
+    /// <summary>Gets the albums (shared by the whole family; deleted ones included, see <see cref="Album.DeletedAt"/>).</summary>
+    public DbSet<Album> Albums => Set<Album>();
+
+    /// <summary>Gets which photos are in which album (removed ones included, see <see cref="AlbumPhoto.RemovedAt"/>).</summary>
+    public DbSet<AlbumPhoto> AlbumPhotos => Set<AlbumPhoto>();
+
     /// <inheritdoc />
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {

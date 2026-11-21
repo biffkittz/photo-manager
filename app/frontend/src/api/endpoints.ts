@@ -1,6 +1,8 @@
 import { apiFetch } from './http'
 import type {
+  AlbumSummary,
   DownloadResponse,
+  GalleryPeriod,
   GallerySort,
   JobKind,
   InviteCreated,
@@ -8,10 +10,12 @@ import type {
   JobResponse,
   LibraryOverview,
   Member,
+  OnThisDayYear,
   PeopleResponse,
   PhotoDetails,
   PhotoPage,
   SessionResponse,
+  TimelineMonth,
   UploadItemStatus,
 } from './types'
 
@@ -23,8 +27,16 @@ export const api = {
   redeemInvite: (token: string) =>
     apiFetch<InvitePreview>('/api/auth/invites/redeem', { method: 'POST', body: { token } }),
 
+  /** `offset` is the viewer's UTC offset in minutes: years and months are those of their calendar. */
   listPhotos: (
-    params: { q?: string; cursor?: string | null; sort?: GallerySort; limit?: number },
+    params: {
+      q?: string
+      cursor?: string | null
+      sort?: GallerySort
+      limit?: number
+      period?: GalleryPeriod | null
+      offset?: number
+    },
     signal?: AbortSignal,
   ) => {
     const query = new URLSearchParams()
@@ -32,8 +44,24 @@ export const api = {
     if (params.cursor) query.set('cursor', params.cursor)
     if (params.sort) query.set('sort', params.sort)
     if (params.limit) query.set('limit', String(params.limit))
+    if (params.period) {
+      query.set('year', String(params.period.year))
+      if (params.period.month) query.set('month', String(params.period.month))
+    }
+    if (params.offset) query.set('offset', String(params.offset))
     return apiFetch<PhotoPage>(`/api/photos?${query.toString()}`, { signal })
   },
+  timeline: (q: string, offset: number, signal?: AbortSignal) => {
+    const query = new URLSearchParams({ offset: String(offset) })
+    if (q) query.set('q', q)
+    return apiFetch<TimelineMonth[]>(`/api/photos/timeline?${query.toString()}`, { signal })
+  },
+  /** `date` is the viewer's date (yyyy-MM-dd). */
+  onThisDay: (date: string, offset: number, signal?: AbortSignal) =>
+    apiFetch<OnThisDayYear[]>(
+      `/api/photos/on-this-day?${new URLSearchParams({ date, offset: String(offset) }).toString()}`,
+      { signal },
+    ),
   photo: (id: string, signal?: AbortSignal) =>
     apiFetch<PhotoDetails>(`/api/photos/${encodeURIComponent(id)}`, { signal }),
   updateDescription: (id: string, description: string) =>
@@ -52,10 +80,42 @@ export const api = {
   retryUpload: (id: string) =>
     apiFetch<void>(`/api/uploads/${encodeURIComponent(id)}/retry`, { method: 'POST' }),
 
-  createDownload: (photoIds: string[]) =>
-    apiFetch<DownloadResponse>('/api/downloads', { method: 'POST', body: { photoIds } }),
+  /** Selected photos, or a whole album (a ZIP named after it). */
+  createDownload: (target: string[] | { albumId: string }) =>
+    apiFetch<DownloadResponse>('/api/downloads', {
+      method: 'POST',
+      body: Array.isArray(target) ? { photoIds: target } : { albumId: target.albumId },
+    }),
   download: (id: string, signal?: AbortSignal) =>
     apiFetch<DownloadResponse>(`/api/downloads/${encodeURIComponent(id)}`, { signal }),
+
+  albums: (signal?: AbortSignal) => apiFetch<AlbumSummary[]>('/api/albums', { signal }),
+  album: (id: string, signal?: AbortSignal) =>
+    apiFetch<AlbumSummary>(`/api/albums/${encodeURIComponent(id)}`, { signal }),
+  albumPhotos: (id: string, cursor: string | null, signal?: AbortSignal) =>
+    apiFetch<PhotoPage>(
+      `/api/albums/${encodeURIComponent(id)}/photos${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`,
+      { signal },
+    ),
+  createAlbum: (name: string, photoIds: string[]) =>
+    apiFetch<AlbumSummary>('/api/albums', { method: 'POST', body: { name, photoIds } }),
+  updateAlbum: (id: string, changes: { name?: string; coverPhotoId?: string }) =>
+    apiFetch<AlbumSummary>(`/api/albums/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: changes,
+    }),
+  deleteAlbum: (id: string) =>
+    apiFetch<void>(`/api/albums/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  addToAlbum: (id: string, photoIds: string[]) =>
+    apiFetch<AlbumSummary>(`/api/albums/${encodeURIComponent(id)}/photos`, {
+      method: 'POST',
+      body: { photoIds },
+    }),
+  removeFromAlbum: (id: string, photoIds: string[]) =>
+    apiFetch<AlbumSummary>(`/api/albums/${encodeURIComponent(id)}/photos/remove`, {
+      method: 'POST',
+      body: { photoIds },
+    }),
 
   jobs: (signal?: AbortSignal) => apiFetch<JobResponse[]>('/api/jobs', { signal }),
   overview: (signal?: AbortSignal) => apiFetch<LibraryOverview>('/api/jobs/overview', { signal }),

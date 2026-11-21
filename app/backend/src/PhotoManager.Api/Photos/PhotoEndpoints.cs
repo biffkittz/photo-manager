@@ -20,8 +20,10 @@ public static class PhotoEndpoints
 {
     private const int DefaultPageSize = 60;
     private const int MaxPageSize = 120;
-    private const int MaxQueryLength = 200;
     private const int MaxEditedDescriptionLength = 300;
+
+    // "On this day" shows a strip of earlier years; a few hundred photos from one date is already a lot of scrolling.
+    private const int MaxOnThisDayPhotos = 200;
 
     // Renditions are small WebP files (a preview is well under 1 MB); anything larger is not ours.
     private const int MaxRenditionBytes = 8 * 1024 * 1024;
@@ -34,6 +36,8 @@ public static class PhotoEndpoints
         ArgumentNullException.ThrowIfNull(api);
         var photos = api.MapGroup("/photos");
         photos.MapGet("/", ListAsync);
+        photos.MapGet("/timeline", TimelineAsync);
+        photos.MapGet("/on-this-day", OnThisDayAsync);
         photos.MapGet("/{id:guid}", GetAsync);
         photos.MapPatch("/{id:guid}", UpdateAsync);
         photos.MapGet("/{id:guid}/thumbnail", (Guid id, HttpContext http, PhotoDbContext db, IBlobStore blobs, PhotoCryptoService crypto, PhotoWorkflowClient workflows, TimeProvider time, CancellationToken ct) =>
@@ -44,17 +48,30 @@ public static class PhotoEndpoints
         return api;
     }
 
-    private static async Task<IResult> ListAsync(PhotoDbContext db, string? q, string? cursor, int? limit, string? sort, CancellationToken ct)
+    private static async Task<IResult> ListAsync(
+        PhotoDbContext db,
+        string? q,
+        string? cursor,
+        int? limit,
+        string? sort,
+        int? year,
+        int? month,
+        int? offset,
+        CancellationToken ct)
     {
-        if (q is { Length: > MaxQueryLength })
+        if (PhotoQueries.ValidateSearch(q) is { } searchErrors)
         {
-            return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["q"] = [$"Search text is limited to {MaxQueryLength} characters."] });
+            return TypedResults.ValidationProblem(searchErrors);
         }
 
-        // PostgreSQL rejects NUL in text (error 22021); refuse control characters up front instead of failing with a 500.
-        if (q is not null && q.Any(char.IsControl))
+        if (!PhotoQueries.TryUtcOffset(offset, out var utcOffset))
         {
-            return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["q"] = ["Search text contains invalid characters."] });
+            return TypedResults.ValidationProblem(PhotoQueries.OffsetError());
+        }
+
+        if (ValidatePeriod(year, month) is { } periodErrors)
+        {
+            return TypedResults.ValidationProblem(periodErrors);
         }
 
         GalleryCursor? after = null;
@@ -65,15 +82,14 @@ public static class PhotoEndpoints
 
         var byTaken = string.Equals(sort, "taken", StringComparison.OrdinalIgnoreCase);
         var size = Math.Clamp(limit ?? DefaultPageSize, 1, MaxPageSize);
-        var query = db.Photos.AsNoTracking().Where(p => p.Status == PhotoStatus.Ready);
+        var query = PhotoQueries.Search(PhotoQueries.Library(db.Photos), q);
 
-        if (!string.IsNullOrWhiteSpace(q))
+        // The timeline: a year, or one month of it, in the viewer's calendar. SortDate (taken, else uploaded) has an
+        // index that starts with the status, so this is a range scan whichever order is chosen.
+        if (year is { } periodYear)
         {
-            var text = q.Trim();
-            var pattern = $"%{EscapeLike(text)}%";
-            query = query.Where(p =>
-                p.SearchVector.Matches(EF.Functions.WebSearchToTsQuery("english", text))
-                || EF.Functions.ILike(p.OriginalFileName, pattern, "\\"));
+            var (from, to) = PhotoQueries.Period(periodYear, month, utcOffset);
+            query = query.Where(p => p.SortDate >= from && p.SortDate < to);
         }
 
         // Keyset pagination: stable under concurrent inserts and O(page) regardless of depth, unlike OFFSET.
@@ -106,7 +122,89 @@ public static class PhotoEndpoints
             next = new GalleryCursor(byTaken ? last.SortDate : last.UploadedAt, last.Id).Encode();
         }
 
-        return TypedResults.Ok(new PhotoPage([.. items.Select(ToSummary)], next));
+        return TypedResults.Ok(new PhotoPage([.. items.Select(PhotoQueries.ToSummary)], next));
+    }
+
+    /// <summary>
+    /// How many photos each month has (taken, else uploaded; in the viewer's calendar), newest first, for the
+    /// gallery's year and month buttons. Follows the search, so only years with matching photos are offered.
+    /// </summary>
+    private static async Task<IResult> TimelineAsync(PhotoDbContext db, string? q, int? offset, CancellationToken ct)
+    {
+        if (PhotoQueries.ValidateSearch(q) is { } searchErrors)
+        {
+            return TypedResults.ValidationProblem(searchErrors);
+        }
+
+        if (!PhotoQueries.TryUtcOffset(offset, out var utcOffset))
+        {
+            return TypedResults.ValidationProblem(PhotoQueries.OffsetError());
+        }
+
+        var months = await PhotoQueries.Search(PhotoQueries.Library(db.Photos), q)
+            .Select(p => p.SortDate + utcOffset)
+            .GroupBy(local => new { local.Year, local.Month })
+            .Select(g => new TimelineMonth(g.Key.Year, g.Key.Month, g.Count()))
+            .ToListAsync(ct);
+        return TypedResults.Ok(months.OrderByDescending(m => m.Year).ThenByDescending(m => m.Month).ToList());
+    }
+
+    /// <summary>
+    /// Photos taken on the viewer's date (today, in their calendar) in earlier years, grouped by year, most recent
+    /// year first. Only real capture dates count: an upload date says nothing about when a photo was taken.
+    /// </summary>
+    private static async Task<IResult> OnThisDayAsync(PhotoDbContext db, DateOnly? date, int? offset, CancellationToken ct)
+    {
+        if (date is not { } today)
+        {
+            return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["date"] = ["Give today's date (yyyy-MM-dd)."] });
+        }
+
+        if (!PhotoQueries.TryUtcOffset(offset, out var utcOffset))
+        {
+            return TypedResults.ValidationProblem(PhotoQueries.OffsetError());
+        }
+
+        var (year, month, day) = (today.Year, today.Month, today.Day);
+        var photos = await PhotoQueries.Library(db.Photos)
+            .Where(p => p.TakenAt != null)
+            .Select(p => new { Photo = p, Local = p.TakenAt!.Value + utcOffset })
+            .Where(x => x.Local.Month == month && x.Local.Day == day && x.Local.Year < year)
+            .OrderByDescending(x => x.Local.Year)
+            .ThenBy(x => x.Photo.TakenAt)
+            .ThenBy(x => x.Photo.Id)
+            .Take(MaxOnThisDayPhotos)
+            .Select(x => new
+            {
+                x.Local.Year,
+                Summary = new PhotoSummary(x.Photo.Id, x.Photo.OriginalFileName, x.Photo.Description, x.Photo.UploadedAt, x.Photo.TakenAt, x.Photo.Width, x.Photo.Height, x.Photo.RenditionState, x.Photo.RenditionVersion),
+            })
+            .ToListAsync(ct);
+
+        return TypedResults.Ok(photos
+            .GroupBy(p => p.Year)
+            .Select(g => new OnThisDayYear(g.Key, year - g.Key, [.. g.Select(p => p.Summary)]))
+            .ToList());
+    }
+
+    private static Dictionary<string, string[]>? ValidatePeriod(int? year, int? month)
+    {
+        if (year is < PhotoQueries.MinYear or > PhotoQueries.MaxYear)
+        {
+            return new() { ["year"] = ["That year is out of range."] };
+        }
+
+        if (month is null)
+        {
+            return null;
+        }
+
+        if (year is null)
+        {
+            return new() { ["month"] = ["Choose a year as well as a month."] };
+        }
+
+        return month is < 1 or > 12 ? new() { ["month"] = ["Months are numbered 1 to 12."] } : null;
     }
 
     // Only photos in the library are visible here. In-progress, failed and duplicate uploads are listed to their
@@ -290,12 +388,6 @@ public static class PhotoEndpoints
         await audit.WriteAsync("photo.describe.request", id.ToString(), null);
         return TypedResults.Accepted((string?)null);
     }
-
-    private static string EscapeLike(string value) =>
-        value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal);
-
-    private static PhotoSummary ToSummary(Photo p) =>
-        new(p.Id, p.OriginalFileName, p.Description, p.UploadedAt, p.TakenAt, p.Width, p.Height, p.RenditionState, p.RenditionVersion);
 
     private static PhotoDetails ToDetails(Photo p) =>
         new(p.Id, p.OriginalFileName, p.Description, p.DescriptionSource, p.DescriptionState, p.Tags, p.ContentType, p.SizeBytes, p.Width, p.Height,

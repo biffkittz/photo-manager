@@ -58,6 +58,11 @@ never read or print it).
 - Ownership (uploads, prepared downloads) and audit actors use the user id (`User.UserId()`), never the name: the
   numeric GitHub id (positive) or the `family_members` id of a Google-invited member (negative), so `!= 0`, never
   `> 0`, means "signed in". Photo endpoints only expose `Ready` photos.
+- Albums are shared by everyone signed in (docs/adr/0013): deleting one sets `albums.deleted_at`, removing a photo
+  sets `album_photos.removed_at` (re-adding clears it), and only `Ready` photos are listed, counted or downloaded
+  (`AlbumEndpoints.Summaries`). Workers never read albums: an album download stores its photo ids and ZIP name.
+- Dates grouped for people (timeline, "On this day") use the viewer's UTC offset (`PhotoQueries.TryUtcOffset`),
+  like the dates the SPA prints.
 - Admins exist only in configuration (`Auth:Users`, GitHub). Members invited from the People page sign in with
   Google, are recognized only by the Google account id bound when they accept, and are always plain members.
 - Anything that records state and then starts a workflow must undo that state if Temporal is unreachable

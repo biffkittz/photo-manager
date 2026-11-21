@@ -1,8 +1,9 @@
 <script setup lang="ts">
 /**
- * Photo viewer (nested route /gallery/photos/:id, so photos are deep-linkable). Shows the large preview,
- * metadata, description editing, AI re-description and original download. Left/right arrow keys, the
- * Previous/Next buttons and, on touch screens, swiping the photo go to the previous/next photo.
+ * Photo viewer (nested route /gallery/photos/:id or /albums/:albumId/photos/:id, so photos are deep-linkable).
+ * Shows the large preview, metadata, description editing, AI re-description, original download and adding to an
+ * album (and, in an album, making the photo its cover). Left/right arrow keys, the Previous/Next buttons and, on
+ * touch screens, swiping the photo go to the previous/next photo of the list it was opened from.
  *
  * Layout: on phones and tablets the photo spans the width at its own aspect ratio (at most 70% of the screen
  * height) with the details below it, scrolling together, so the two can never overlap. On large screens they sit
@@ -12,6 +13,7 @@ import {
   computed,
   defineAsyncComponent,
   inject,
+  nextTick,
   onBeforeUnmount,
   onMounted,
   ref,
@@ -25,6 +27,7 @@ import BaseButton from '@/components/BaseButton.vue'
 import BaseSpinner from '@/components/BaseSpinner.vue'
 import ErrorAlert from '@/components/ErrorAlert.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
+import { useUpdateAlbum } from '@/composables/useAlbums'
 import { useDownload } from '@/composables/useDownload'
 import {
   usePhotoQuery,
@@ -34,16 +37,19 @@ import {
 import { useRendition } from '@/composables/useRendition'
 import { useNotificationsStore } from '@/stores/notifications'
 import { formatBytes, formatDateTime } from '@/utils/format'
-import { galleryNavigationKey } from './galleryNavigation'
+import { photoNavigationKey } from './galleryNavigation'
 
 const props = defineProps<{ id: string }>()
 
-// Loaded on first edit: keeps the form-validation libraries out of the viewer's initial download.
+// Loaded on first use: keeps the form-validation libraries out of the viewer's initial download.
 const EditDescriptionForm = defineAsyncComponent(() => import('./EditDescriptionForm.vue'))
+const AddToAlbumDialog = defineAsyncComponent(
+  () => import('@/features/albums/AddToAlbumDialog.vue'),
+)
 
 const router = useRouter()
 const route = useRoute()
-const navigation = inject(galleryNavigationKey, null)
+const navigation = inject(photoNavigationKey, null)
 const notifications = useNotificationsStore()
 
 const { data: photo, isPending, error, refetch } = usePhotoQuery(toRef(props, 'id'))
@@ -52,6 +58,9 @@ const regenerate = useRegenerateDescription()
 const { state: downloadState, download } = useDownload()
 
 const editing = ref(false)
+const addingToAlbum = ref(false)
+const album = computed(() => navigation?.album?.value)
+const updateAlbum = useUpdateAlbum()
 const previewUrl = computed(() => urls.preview(props.id, photo.value?.renditionVersion ?? 0))
 const { status: previewStatus, handleImageError } = useRendition(
   previewUrl,
@@ -62,7 +71,7 @@ const open = computed({
   get: () => true,
   set: (value: boolean) => {
     if (!value) {
-      void router.push({ name: 'gallery', query: route.query })
+      void router.push(navigation?.closeRoute() ?? { name: 'gallery', query: route.query })
     }
   },
 })
@@ -75,14 +84,24 @@ const nextId = computed(() =>
   navigation && index.value >= 0 ? navigation.ids.value[index.value + 1] : undefined,
 )
 
+const dialog = ref<{ focus: () => void } | null>(null)
+
 watch(
   () => props.id,
-  () => (editing.value = false),
+  async () => {
+    editing.value = false
+    // Reaching the first or last photo disables Previous or Next; if that button had focus, the browser drops it
+    // on the page body. Keep it in the viewer.
+    await nextTick()
+    if (!document.activeElement || document.activeElement === document.body) dialog.value?.focus()
+  },
 )
 
 function go(id: string | undefined): void {
   if (id) {
-    void router.replace({ name: 'photo', params: { id }, query: route.query })
+    void router.replace(
+      navigation?.photoRoute(id) ?? { name: 'photo', params: { id }, query: route.query },
+    )
   }
   if (navigation && index.value >= navigation.ids.value.length - 3) {
     void navigation.loadMore()
@@ -94,6 +113,7 @@ function go(id: string | undefined): void {
 function onKeydown(event: KeyboardEvent): void {
   if (
     editing.value ||
+    addingToAlbum.value ||
     event.defaultPrevented ||
     event.altKey ||
     event.ctrlKey ||
@@ -130,7 +150,7 @@ function onTouchEnd(event: TouchEvent): void {
   const touch = event.changedTouches[0]
   const start = swipeStart
   swipeStart = null
-  if (!start || !touch || editing.value) return
+  if (!start || !touch || editing.value || addingToAlbum.value) return
 
   const dx = touch.clientX - start.x
   const dy = touch.clientY - start.y
@@ -149,6 +169,19 @@ async function save(description: string): Promise<void> {
   }
 }
 
+async function useAsCover(): Promise<void> {
+  if (!album.value) return
+  try {
+    await updateAlbum.mutateAsync({ id: album.value.id, coverPhotoId: props.id })
+    notifications.notify('success', `This photo is now the cover of “${album.value.name}”.`)
+  } catch (e) {
+    notifications.notify(
+      'error',
+      e instanceof ApiError ? e.message : 'The cover could not be changed.',
+    )
+  }
+}
+
 async function describeAgain(): Promise<void> {
   try {
     await regenerate.mutateAsync(props.id)
@@ -161,6 +194,7 @@ async function describeAgain(): Promise<void> {
 
 <template>
   <ModalDialog
+    ref="dialog"
     v-model:open="open"
     :title="photo?.description || photo?.fileName || 'Photo'"
     size="full"
@@ -257,16 +291,28 @@ async function describeAgain(): Promise<void> {
             >
           </dl>
 
-          <BaseButton
-            variant="primary"
-            :loading="downloadState === 'preparing'"
-            @click="download([photo.id])"
-          >
-            {{ downloadState === 'preparing' ? 'Decrypting original...' : 'Download original' }}
-          </BaseButton>
+          <div class="flex flex-col gap-2">
+            <BaseButton
+              variant="primary"
+              :loading="downloadState === 'preparing'"
+              @click="download([photo.id])"
+            >
+              {{ downloadState === 'preparing' ? 'Decrypting original...' : 'Download original' }}
+            </BaseButton>
+            <BaseButton @click="addingToAlbum = true">Add to album</BaseButton>
+            <template v-if="album">
+              <p v-if="album.cover?.id === photo.id" class="text-center text-sm text-muted">
+                This is the album's cover.
+              </p>
+              <BaseButton v-else :loading="updateAlbum.isPending.value" @click="useAsCover"
+                >Use as album cover</BaseButton
+              >
+            </template>
+          </div>
         </aside>
       </template>
     </div>
+    <AddToAlbumDialog v-if="addingToAlbum" v-model:open="addingToAlbum" :photo-ids="[props.id]" />
     <template #footer>
       <BaseButton class="flex-1 sm:flex-none" :disabled="!previousId" @click="go(previousId)"
         >Previous</BaseButton

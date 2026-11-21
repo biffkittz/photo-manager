@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useNotificationsStore } from '@/stores/notifications'
 
 const auth = useAuthStore()
 const { user, isAdmin, displayName } = storeToRefs(auth)
 const router = useRouter()
+const route = useRoute()
 const notifications = useNotificationsStore()
 
 async function signOut(): Promise<void> {
@@ -24,10 +25,15 @@ async function signOut(): Promise<void> {
 }
 
 // Phones: the links share the full width of their own row, below the name and Sign out (two rows instead of
-// three); touch screens get 44px tall tap targets.
-const linkClass =
-  'block rounded-md px-3 py-2 text-center text-sm font-medium text-muted hover:bg-surface-muted hover:text-text pointer-coarse:py-3'
-const activeClass = 'bg-surface-muted !text-text'
+// three), with little padding so five of them fit a 360px screen; touch screens get 44px tall tap targets.
+const baseLinkClass =
+  'block rounded-md px-1 py-2 text-center text-sm font-medium hover:bg-surface-muted hover:text-text sm:px-3 pointer-coarse:py-3'
+
+/** A section's link stays highlighted on its sub-pages (an album, a photo). */
+function linkClass(section: string): string {
+  const current = route.path === section || route.path.startsWith(`${section}/`)
+  return `${baseLinkClass} ${current ? 'bg-surface-muted text-text' : 'text-muted'}`
+}
 </script>
 
 <template>
@@ -41,24 +47,19 @@ const activeClass = 'bg-surface-muted !text-text'
       <nav v-if="user" aria-label="Main" class="order-last w-full sm:order-none sm:w-auto">
         <ul class="flex gap-1">
           <li class="flex-1 sm:flex-none">
-            <RouterLink to="/gallery" :class="linkClass" :active-class="activeClass"
-              >Gallery</RouterLink
-            >
+            <RouterLink to="/gallery" :class="linkClass('/gallery')">Gallery</RouterLink>
           </li>
           <li class="flex-1 sm:flex-none">
-            <RouterLink to="/uploads" :class="linkClass" :active-class="activeClass"
-              >Uploads</RouterLink
-            >
+            <RouterLink to="/albums" :class="linkClass('/albums')">Albums</RouterLink>
+          </li>
+          <li class="flex-1 sm:flex-none">
+            <RouterLink to="/uploads" :class="linkClass('/uploads')">Uploads</RouterLink>
           </li>
           <li v-if="isAdmin" class="flex-1 sm:flex-none">
-            <RouterLink to="/actions" :class="linkClass" :active-class="activeClass"
-              >Actions</RouterLink
-            >
+            <RouterLink to="/actions" :class="linkClass('/actions')">Actions</RouterLink>
           </li>
           <li v-if="isAdmin" class="flex-1 sm:flex-none">
-            <RouterLink to="/people" :class="linkClass" :active-class="activeClass"
-              >People</RouterLink
-            >
+            <RouterLink to="/people" :class="linkClass('/people')">People</RouterLink>
           </li>
         </ul>
       </nav>

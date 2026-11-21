@@ -24,6 +24,80 @@ namespace PhotoManager.Data.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("PhotoManager.Data.Entities.Album", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid?>("CoverPhotoId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cover_photo_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<long>("CreatedById")
+                        .HasColumnType("bigint")
+                        .HasColumnName("created_by_id");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("Id")
+                        .HasName("pk_albums");
+
+                    b.HasIndex("CoverPhotoId")
+                        .HasDatabaseName("ix_albums_cover_photo_id");
+
+                    b.ToTable("albums", (string)null);
+                });
+
+            modelBuilder.Entity("PhotoManager.Data.Entities.AlbumPhoto", b =>
+                {
+                    b.Property<Guid>("AlbumId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("album_id");
+
+                    b.Property<Guid>("PhotoId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("photo_id");
+
+                    b.Property<DateTimeOffset>("AddedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("added_at");
+
+                    b.Property<DateTimeOffset?>("RemovedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("removed_at");
+
+                    b.HasKey("AlbumId", "PhotoId")
+                        .HasName("pk_album_photos");
+
+                    b.HasIndex("PhotoId")
+                        .HasDatabaseName("ix_album_photos_photo_id");
+
+                    b.ToTable("album_photos", (string)null);
+                });
+
             modelBuilder.Entity("PhotoManager.Data.Entities.AuditEvent", b =>
                 {
                     b.Property<long>("Id")
@@ -563,6 +637,41 @@ namespace PhotoManager.Data.Migrations
                         .HasDatabaseName("ix_prepared_downloads_requested_by_created_at");
 
                     b.ToTable("prepared_downloads", (string)null);
+                });
+
+            modelBuilder.Entity("PhotoManager.Data.Entities.Album", b =>
+                {
+                    b.HasOne("PhotoManager.Data.Entities.Photo", null)
+                        .WithMany()
+                        .HasForeignKey("CoverPhotoId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_albums_photos_cover_photo_id");
+                });
+
+            modelBuilder.Entity("PhotoManager.Data.Entities.AlbumPhoto", b =>
+                {
+                    b.HasOne("PhotoManager.Data.Entities.Album", "Album")
+                        .WithMany("Photos")
+                        .HasForeignKey("AlbumId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_album_photos_albums_album_id");
+
+                    b.HasOne("PhotoManager.Data.Entities.Photo", "Photo")
+                        .WithMany()
+                        .HasForeignKey("PhotoId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_album_photos_photos_photo_id");
+
+                    b.Navigation("Album");
+
+                    b.Navigation("Photo");
+                });
+
+            modelBuilder.Entity("PhotoManager.Data.Entities.Album", b =>
+                {
+                    b.Navigation("Photos");
                 });
 #pragma warning restore 612, 618
         }

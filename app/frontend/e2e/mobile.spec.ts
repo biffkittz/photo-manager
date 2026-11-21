@@ -23,8 +23,26 @@ const photos = Array.from({ length: 12 }, (_, i) => ({
   renditionVersion: 1,
 }))
 
+// Ten years of photos: more year buttons than a phone is wide.
+const timeline = Array.from({ length: 10 }, (_, i) => ({ year: 2026 - i, month: 7, count: 3 }))
+
+const album = {
+  id: 'a1',
+  name: 'Three generations at the seaside: the long summer holiday of 2019',
+  photoCount: photos.length,
+  firstDate: '2019-07-01T10:00:00Z',
+  lastDate: '2019-08-20T10:00:00Z',
+  cover: photos[0],
+}
+
 async function mockGallery(page: Page): Promise<void> {
   await mockSession(page, admin)
+  await page.route(/\/api\/photos\/timeline\?/, (route) => route.fulfill({ json: timeline }))
+  await page.route(/\/api\/albums$/, (route) => route.fulfill({ json: [album] }))
+  await page.route(/\/api\/albums\/a1$/, (route) => route.fulfill({ json: album }))
+  await page.route(/\/api\/albums\/a1\/photos/, (route) =>
+    route.fulfill({ json: { items: photos, nextCursor: null } }),
+  )
   await page.route('**/api/photos?*', (route) =>
     route.fulfill({ json: { items: photos, nextCursor: null } }),
   )
@@ -206,6 +224,10 @@ test('no page is wider than the phone screen', async ({ page }) => {
 
   const pages: [string, (page: Page) => Locator][] = [
     ['/gallery', (p) => p.getByRole('list', { name: 'Photos' })],
+    // The year buttons scroll sideways inside their own row, never the page.
+    ['/gallery?year=2019&month=7', (p) => p.getByRole('heading', { name: /^July 2019/ })],
+    ['/albums', (p) => p.getByRole('list', { name: 'Albums' })],
+    ['/albums/a1', (p) => p.getByRole('list', { name: 'Photos in this album' })],
     ['/uploads', (p) => p.getByText('Choose photos')],
     ['/people', (p) => p.getByText('grandma.with.a.long.address@example.com')],
     // A six-column table used to make this page scroll sideways; phones get one card per job.
@@ -223,4 +245,31 @@ test('no page is wider than the phone screen', async ({ page }) => {
 
   // Still on /actions (last above).
   await expectTappable(page.getByRole('button', { name: 'Cancel Generate descriptions' }))
+})
+
+test('the timeline, album actions and selection are easy to reach and tap', async ({ page }) => {
+  await mockGallery(page)
+  await page.goto('/gallery?year=2017')
+
+  // The chosen year is scrolled into view in its row.
+  const year = page.getByRole('list', { name: 'Years' }).getByRole('link', { name: '2017' })
+  await expect(year).toBeInViewport()
+  await expectTappable(year)
+  await expectTappable(
+    page.getByRole('list', { name: 'Months of 2017' }).getByRole('link', { name: 'Jul' }),
+  )
+
+  await page.goto('/albums/a1')
+  for (const name of ['Add photos', 'Download', 'Rename', 'Delete']) {
+    await expectTappable(page.getByRole('button', { name, exact: true }))
+  }
+
+  await page.getByLabel('Select photo number 2', { exact: true }).check()
+  const bar = page.getByRole('region', { name: 'Selection' })
+  for (const name of ['Select all', 'Clear', 'Download original', 'Remove from album']) {
+    await expectTappable(bar.getByRole('button', { name }))
+  }
+  const box = (await bar.boundingBox())!
+  expect(box.y + box.height).toBeGreaterThan(840)
+  await expectAccessible(page)
 })

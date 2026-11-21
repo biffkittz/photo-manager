@@ -66,7 +66,10 @@ flowchart LR
   Each request re-checks that the member has not been removed and is still linked to the same Google account.
   Details: [ADR 0012](adr/0012-google-sign-in-for-invited-members.md).
 - Roles: **Member** (browse, search, upload, download, edit descriptions, request an AI description or a
-  rendition rebuild for one photo) and **Admin** (also maintenance jobs: re-index, backfills, cancellation).
+  rendition rebuild for one photo, create and change the shared albums) and **Admin** (also maintenance jobs:
+  re-index, backfills, cancellation; the People page). Albums are shared by everyone signed in, with no
+  per-album permissions; deleting an album or taking a photo out of one only records when, so it can be undone
+  ([ADR 0013](adr/0013-shared-albums-and-timeline.md)).
 - Recommendation: require two-factor authentication on every allowlisted GitHub account, and suggest Google's
   2-Step Verification to invited family members. Prefer invites limited to the person's Google address.
 
@@ -74,7 +77,8 @@ flowchart LR
 
 The `audit_events` table records `auth.signin`, `auth.denied`, `auth.signout`, `photo.upload`,
 `photo.download.request`, `photo.download`, `photos.zip`, `photo.describe.request`, `photo.describe.edit`,
-`job.start` and `job.cancel` with the user, time and a minimal detail. The web tier can insert audit rows but
+`album.create`, `album.update`, `album.add`, `album.remove`, `album.delete`, `job.start` and `job.cancel` with
+the user, time and a minimal detail. The web tier can insert audit rows but
 cannot read them back, change or delete them. Workers additionally log every download they prepare (requester,
 photo count, size) to Application Insights, independently of the web tier.
 

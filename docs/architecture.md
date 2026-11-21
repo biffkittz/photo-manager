@@ -2,7 +2,7 @@
 
 Photo Manager is a private photo library for a family archive that already lives, encrypted, in the Wasabi
 bucket `photo-bk` (written over the years by `protect.ps1`). The app lets the family browse, search, download
-and upload photos: admins sign in with allowlisted GitHub accounts, and family members, invited from the app's
+and upload photos, find them by year and month, and gather them into shared albums: admins sign in with allowlisted GitHub accounts, and family members, invited from the app's
 People page, with Google. Every photo stays encrypted at rest; new uploads get an AI description (Gemini)
 before they are encrypted into the archive.
 
@@ -44,10 +44,10 @@ flowchart LR
 
 | Component | Technology | Responsibility |
 |---|---|---|
-| Web (`ca-photo-web`) | ASP.NET Core 11, Kestrel :8080, Vue 3 SPA in `wwwroot` | GitHub and Google sign-in, invites, gallery/search API, streams renditions and prepared downloads (decrypting with the **web key**), stages uploads, starts workflows |
+| Web (`ca-photo-web`) | ASP.NET Core 11, Kestrel :8080, Vue 3 SPA in `wwwroot` | GitHub and Google sign-in, invites, gallery/search/timeline and album API, streams renditions and prepared downloads (decrypting with the **web key**), stages uploads, starts workflows |
 | Worker (`ca-photo-worker`) | .NET 11, Temporal .NET SDK | All archive cryptography, Gemini calls, renditions, indexing, downloads. No public ingress |
 | Migrator (`caj-photo-migrate`) | .NET 11 console, Container Apps Job | Applies EF Core migrations and least-privilege PostgreSQL grants inside the VNet |
-| PostgreSQL | Azure Database for PostgreSQL flexible server | Photo metadata, jobs, downloads, audit log. No photo bytes |
+| PostgreSQL | Azure Database for PostgreSQL flexible server | Photo metadata, albums, jobs, downloads, audit log. No photo bytes |
 | Blob storage | Azure Storage (private endpoint, Entra-only) | Web-key-encrypted staging uploads, renditions, prepared downloads; Data Protection key ring |
 | Archive | Wasabi `photo-bk` (us-east-2) | Encrypted originals: legacy `protect.ps1` files and v2 files written by the app |
 | Temporal Cloud | Namespace `photo.joqqs`, API-key auth | Durable orchestration of ingest, indexing, backfills, downloads |
@@ -120,9 +120,19 @@ the rendition is ready. A rendition that turns out to be missing, corrupted or e
 is regenerated the same way. Admins can backfill everything up front from the Actions page; that backfill also
 hides byte-identical copies of the same photo ([ADR 0010](adr/0010-duplicates.md)).
 
+### Albums, the timeline and "On this day"
+
+Albums are rows in PostgreSQL (`albums`, `album_photos`) that only the web tier reads and writes; they hold photo
+ids, never bytes, and nothing in them is ever deleted (`deleted_at`, `removed_at`). Everyone signed in shares
+them. The gallery's year and month buttons come from `GET /api/photos/timeline` (photo counts per month) and
+narrow `GET /api/photos` with `year`/`month`; "On this day" is `GET /api/photos/on-this-day`. All three group
+dates in the viewer's calendar, from the UTC offset the browser sends. Downloading an album is an ordinary
+prepared download whose photo ids the API takes from the album. See [ADR 0013](adr/0013-shared-albums-and-timeline.md).
+
 ### Downloading originals
 
-The API cannot decrypt originals. `POST /api/downloads` creates a request and starts `PrepareDownload`; a
+The API cannot decrypt originals. `POST /api/downloads` (selected photos, or an album) creates a request and
+starts `PrepareDownload`; a
 worker streams the original(s) out of Wasabi, decrypts with the archive key and re-encrypts with the web key
 (a ZIP for several photos) into the `downloads` container. The SPA polls, then downloads
 `/api/downloads/{id}/content`, which the API decrypts on the fly. Prepared downloads expire after a day (blob

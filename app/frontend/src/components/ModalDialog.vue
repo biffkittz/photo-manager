@@ -15,12 +15,19 @@ defineSlots<{ default(): unknown; footer?(): unknown }>()
 
 const panel = ref<HTMLElement | null>(null)
 const titleId = useId()
-useFocusTrap(panel, open)
+useFocusTrap(panel, open, close)
 useScrollLock(open)
 
 function close(): void {
   open.value = false
 }
+
+/** Moves focus to the dialog itself (for when the focused control went away, such as a button now disabled). */
+function focus(): void {
+  panel.value?.focus()
+}
+
+defineExpose({ focus })
 </script>
 
 <template>
@@ -30,7 +37,6 @@ function close(): void {
       class="fixed inset-0 z-40 flex items-center justify-center bg-black/60"
       :class="size === 'full' ? 'roomy:p-4' : 'p-4'"
       @click.self="close"
-      @keydown.esc.stop="close"
     >
       <div
         ref="panel"

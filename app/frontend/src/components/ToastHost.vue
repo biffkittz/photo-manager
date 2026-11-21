@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * Renders notifications in a polite live region so screen readers announce them. On phones they span the width
- * and float above the bottom bars (photo viewer's Previous/Next, gallery selection) instead of covering them.
+ * and float above the bottom bars (photo viewer's Previous/Next, the two-row selection bar) instead of covering them.
  */
 import { storeToRefs } from 'pinia'
 import { useNotificationsStore } from '@/stores/notifications'
@@ -14,7 +14,7 @@ const { items } = storeToRefs(store)
   <div
     aria-live="polite"
     aria-atomic="false"
-    class="pointer-events-none fixed inset-x-4 bottom-20 z-50 flex flex-col gap-2 sm:bottom-4 sm:left-auto sm:w-80"
+    class="pointer-events-none fixed inset-x-4 bottom-32 z-50 flex flex-col gap-2 sm:bottom-4 sm:left-auto sm:w-80"
   >
     <div
       v-for="item in items"

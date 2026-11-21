@@ -14,7 +14,8 @@ npm audit                        # must stay at 0 vulnerabilities (overrides in 
 
 ## Structure
 
-`src/features/<feature>` (auth incl. the invite page, gallery, uploads, jobs, people, errors) holds views and
+`src/features/<feature>` (auth incl. the invite page, gallery incl. timeline and "On this day", albums, uploads,
+jobs, people, errors) holds views and
 feature components; `src/components` shared UI; `src/composables` reusable logic (`useX`); `src/stores` Pinia setup stores;
 `src/api` the typed fetch client and Vue Query hooks; `src/utils/zodSchema.ts` the VeeValidate/Zod adapter;
 `src/styles` Tailwind 4 theme tokens. Unit tests live in `__tests__` next to the code; E2E in `e2e/`.
@@ -36,6 +37,11 @@ feature components; `src/components` shared UI; `src/composables` reusable logic
   get a card layout below `sm`); touch screens get 44px tap targets and 16px text in inputs (iOS zooms into
   smaller text) through `pointer-coarse:` (BaseButton does it); the photo viewer is full screen unless the screen
   is `roomy:` (custom variant in `src/styles/main.css`) and swipes between photos.
+- The photo viewer is one component for the gallery and albums: the page it opens over provides the list and routes
+  (`photoNavigationKey`). Multi-select goes through `useSelection` + `SelectionBar` ("Select all" stops at 500).
+- Dialogs may open from dialogs (`useFocusTrap` keeps a stack: only the innermost handles Tab and Escape).
+- The gallery's year/month live in the URL (`?year=&month=`, `src/utils/calendar.ts`); requests that group dates
+  send `utcOffsetMinutes()` so the server uses the viewer's calendar.
 - Errors: user-facing notifications via the notifications store; no third-party error reporting
   (see `src/plugins/errorHandler.ts` and docs/operations.md#error-reporting).
 - Session end (sign-out, 401, a session check answering "signed out", or another tab, via the

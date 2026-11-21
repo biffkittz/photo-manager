@@ -15,8 +15,9 @@ using PhotoManager.Infrastructure.Temporal;
 namespace PhotoManager.Api.Downloads;
 
 /// <summary>
-/// Downloads of originals. The API cannot decrypt originals (split keys), so it asks a worker to prepare the
-/// download, polls for completion, then streams the web-key-encrypted result, decrypting on the fly.
+/// Downloads of originals: selected photos, or a whole album. The API cannot decrypt originals (split keys), so it
+/// asks a worker to prepare the download, polls for completion, then streams the web-key-encrypted result,
+/// decrypting on the fly.
 /// </summary>
 public static class DownloadEndpoints
 {
@@ -44,15 +45,60 @@ public static class DownloadEndpoints
         CancellationToken ct)
     {
         var limits = options.Value;
-
-        // Check raw list length before deduplicating so a payload full of duplicate GUIDs cannot force a large HashSet allocation.
-        if (request.PhotoIds is null || request.PhotoIds.Count == 0 || request.PhotoIds.Count > limits.MaxPhotosPerDownload)
+        var now = time.GetUtcNow();
+        List<Guid> ids;
+        string zipName;
+        if (request.AlbumId is { } albumId)
         {
-            return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["photoIds"] = [$"Select between 1 and {limits.MaxPhotosPerDownload} photos."] });
+            if (request.PhotoIds is { Count: > 0 })
+            {
+                return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["albumId"] = ["Download either photos or an album, not both."] });
+            }
+
+            var albumName = await db.Albums.AsNoTracking()
+                .Where(a => a.Id == albumId && a.DeletedAt == null)
+                .Select(a => a.Name)
+                .SingleOrDefaultAsync(ct);
+            if (albumName is null)
+            {
+                return TypedResults.NotFound();
+            }
+
+            ids = await db.AlbumPhotos.AsNoTracking()
+                .Where(ap => ap.AlbumId == albumId && ap.RemovedAt == null && ap.Photo.Status == PhotoStatus.Ready)
+                .OrderBy(ap => ap.Photo.SortDate)
+                .ThenBy(ap => ap.PhotoId)
+                .Select(ap => ap.PhotoId)
+                .Take(limits.MaxPhotosPerDownload + 1)
+                .ToListAsync(ct);
+            if (ids.Count == 0)
+            {
+                return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["albumId"] = ["This album has no photos to download."] });
+            }
+
+            if (ids.Count > limits.MaxPhotosPerDownload)
+            {
+                return TypedResults.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["albumId"] = [$"This album has more than {limits.MaxPhotosPerDownload} photos, the most one download can hold. Select up to {limits.MaxPhotosPerDownload} of them and download those."],
+                });
+            }
+
+            // The ZIP is named after the album ("Beach 2019.zip"); the name is sanitized again when it is served.
+            zipName = $"{FileNames.Sanitize(albumName)}.zip";
+        }
+        else
+        {
+            // Check raw list length before deduplicating so a payload full of duplicate GUIDs cannot force a large HashSet allocation.
+            if (request.PhotoIds is null || request.PhotoIds.Count == 0 || request.PhotoIds.Count > limits.MaxPhotosPerDownload)
+            {
+                return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["photoIds"] = [$"Select between 1 and {limits.MaxPhotosPerDownload} photos."] });
+            }
+
+            ids = request.PhotoIds.Distinct().ToList();
+            zipName = string.Create(CultureInfo.InvariantCulture, $"photos-{now:yyyyMMdd-HHmmss}.zip");
         }
 
-        var ids = request.PhotoIds.Distinct().ToList();
-        var now = time.GetUtcNow();
         var userId = http.User.UserId();
         var activePending = await db.Downloads.CountAsync(
             d => d.RequestedById == userId && d.Status == DownloadStatus.Pending && d.ExpiresAt > now,
@@ -97,12 +143,12 @@ public static class DownloadEndpoints
             PhotoIds = ids,
             RequestedBy = http.User.Login(),
             RequestedById = userId,
-            FileName = ids.Count == 1 ? "photo" : "photos.zip",
+            FileName = ids.Count == 1 ? "photo" : zipName,
             ExpiresAt = now.AddDays(1),
         };
         db.Downloads.Add(download);
         await db.SaveChangesAsync(ct);
-        await audit.WriteAsync("photo.download.request", download.Id.ToString(), new { count = ids.Count });
+        await audit.WriteAsync("photo.download.request", download.Id.ToString(), new { count = ids.Count, albumId = request.AlbumId });
         try
         {
             await workflows.StartPrepareDownloadAsync(download.Id);

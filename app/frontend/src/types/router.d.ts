@@ -15,5 +15,7 @@ declare module 'vue-router' {
     /** Only for the Admin role (the API enforces this too; the guard is for UX). */
     requiresAdmin?: boolean
     breadcrumb?: Breadcrumb[]
+    /** The photo viewer (a dialog over the page it was opened from, which keeps its scroll position and focus). */
+    viewer?: boolean
   }
 }

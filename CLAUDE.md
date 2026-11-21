@@ -39,10 +39,12 @@ PostgreSQL, Key Vault, Terraform. Site: `photo.biffkittz.com`.
 
 ## Status (2026-11-20)
 v1 plus the fixes of the 2026-11-19 and 2026-11-20 reviews is deployed at photo.biffkittz.com (2026-11-20).
-Not committed yet: family members invited from the People page who sign in with Google (docs/adr/0012; members
-table with negative user ids; admins stay GitHub-only in Terraform); the Google OAuth client is not created yet
-(docs/operations.md, "Inviting family members"). Tests: backend 179 (Core 73, Worker 54, Api 46 running as the
-least-privileged web database role, Integration 6), frontend lint/format/types + 50 unit + 18 E2E (3 on a phone-sized touch screen). Terraform state uses the owner's existing account
+Committed since: family members invited from the People page who sign in with Google (docs/adr/0012; members
+table with negative user ids; admins stay GitHub-only in Terraform; Google OAuth client setup in
+docs/operations.md, "Inviting family members") and the phone layout fixes. Not committed yet: shared albums, the
+year/month timeline and "On this day" (docs/adr/0013; tables `albums` and `album_photos`, migration `AddAlbums`).
+Tests: backend 191 (Core 73, Worker 54, Api 58 running as the least-privileged web database role, Integration 6),
+frontend lint/format/types + 63 unit + 24 E2E (4 on a phone-sized touch screen). Terraform state uses the owner's existing account
 (`rg-terraform-state`/`demonstration`/`terraform`; CI limited to `photo.terraform.tfstate` by custom roles + ABAC;
 docs/adr/0009). Images go to the owner's existing registry `crloginappdemo7fyguj` (`rg-loginapp-demo`, shared with
 the login app; repositories `photo-*`; the app identities and their *AcrPull* live in `infra/bootstrap`;

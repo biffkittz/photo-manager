@@ -4,7 +4,8 @@ import { useAuthStore } from '@/stores/auth'
 
 /**
  * Routes are code-split (dynamic imports) so each view's code loads on first visit. The photo viewer is a
- * nested route under the gallery, which makes individual photos deep-linkable (/gallery/photos/:id).
+ * nested route under the gallery and under each album, which makes individual photos deep-linkable
+ * (/gallery/photos/:id, /albums/:albumId/photos/:id).
  * Guards here are for user experience only; every API call is authorized server-side.
  */
 export const router = createRouter({
@@ -37,8 +38,31 @@ export const router = createRouter({
           props: true,
           meta: {
             title: 'Photo',
+            viewer: true,
             breadcrumb: [{ label: 'Gallery', to: { name: 'gallery' } }, { label: 'Photo' }],
           },
+        },
+      ],
+    },
+    {
+      path: '/albums',
+      name: 'albums',
+      component: () => import('@/features/albums/AlbumsView.vue'),
+      meta: { title: 'Albums', breadcrumb: [{ label: 'Albums' }] },
+    },
+    {
+      path: '/albums/:albumId',
+      name: 'album',
+      component: () => import('@/features/albums/AlbumView.vue'),
+      props: true,
+      meta: { title: 'Album' },
+      children: [
+        {
+          path: 'photos/:id',
+          name: 'album-photo',
+          component: () => import('@/features/gallery/PhotoViewer.vue'),
+          props: true,
+          meta: { title: 'Photo', viewer: true },
         },
       ],
     },
@@ -68,7 +92,7 @@ export const router = createRouter({
     },
   ],
   scrollBehavior: (to, from, saved) =>
-    to.name === 'photo' || from.name === 'photo' ? false : (saved ?? { top: 0 }),
+    to.meta.viewer || from.meta.viewer ? false : (saved ?? { top: 0 }),
 })
 
 router.beforeEach(async (to) => {
@@ -109,12 +133,7 @@ router.afterEach(async (to, from) => {
   // Move focus to the new page's heading so screen-reader and keyboard users land on the new content
   // (opening/closing the photo viewer manages focus itself). Not when only the query or hash changed on the
   // same page: the gallery search writes ?q= as you type, and focus must stay in the search box.
-  if (
-    from.matched.length > 0 &&
-    to.path !== from.path &&
-    to.name !== 'photo' &&
-    from.name !== 'photo'
-  ) {
+  if (from.matched.length > 0 && to.path !== from.path && !to.meta.viewer && !from.meta.viewer) {
     await nextTick()
     document.querySelector<HTMLElement>('[data-page-title]')?.focus()
   }

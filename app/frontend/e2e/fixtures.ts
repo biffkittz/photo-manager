@@ -32,8 +32,11 @@ export async function mockSession(
   )
 }
 
-/** Fails the test on any CSP violation or uncaught page error. */
-export const test = base.extend<{ guard: void }>({
+/**
+ * Fails the test on any CSP violation or uncaught page error. The gallery's timeline and "On this day" answer
+ * empty unless a test mocks them itself (routes registered later win).
+ */
+export const test = base.extend<{ guard: void; galleryExtras: void }>({
   guard: [
     async ({ page }, use) => {
       const problems: string[] = []
@@ -44,6 +47,15 @@ export const test = base.extend<{ guard: void }>({
       page.on('pageerror', (error) => problems.push(error.message))
       await use()
       expect(problems, problems.join('\n')).toEqual([])
+    },
+    { auto: true },
+  ],
+  galleryExtras: [
+    async ({ page }, use) => {
+      await page.route(/\/api\/photos\/(timeline|on-this-day)\?/, (route) =>
+        route.fulfill({ json: [] }),
+      )
+      await use()
     },
     { auto: true },
   ],

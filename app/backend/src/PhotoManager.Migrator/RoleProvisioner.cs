@@ -6,7 +6,8 @@ namespace PhotoManager.Migrator;
 /// <summary>
 /// Creates PostgreSQL roles for the app's managed identities and grants least privilege. Neither tier may
 /// DELETE anything or alter the schema; the web tier can only append to the audit trail and cannot read it back;
-/// the workers cannot touch it. Only the migrator identity (the server's Entra administrator) owns the tables.
+/// the workers cannot touch it, nor the family members and albums, which only the web tier uses. Only the migrator
+/// identity (the server's Entra administrator) owns the tables.
 /// </summary>
 public static partial class RoleProvisioner
 {
@@ -68,7 +69,7 @@ public static partial class RoleProvisioner
             // table privilege also revokes the matching column privileges.)
             var statements = new List<string>
             {
-                $"REVOKE ALL ON {string.Join(", ", DataTables)}, audit_events, family_members FROM {quotedRole}",
+                $"REVOKE ALL ON {string.Join(", ", DataTables)}, audit_events, family_members, albums, album_photos FROM {quotedRole}",
                 $"GRANT CONNECT ON DATABASE \"{databaseName}\" TO {quotedRole}",
                 $"GRANT USAGE ON SCHEMA public TO {quotedRole}",
                 $"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {quotedRole}",
@@ -85,6 +86,12 @@ public static partial class RoleProvisioner
                     $"GRANT SELECT, INSERT, UPDATE ON family_members TO {quotedRole}",
                     $"GRANT SELECT, INSERT ON photos TO {quotedRole}",
                     $"GRANT UPDATE ({string.Join(", ", WebEditablePhotoColumns)}) ON photos TO {quotedRole}",
+
+                    // Albums are shared by the family: create, rename, choose a cover, delete (deleted_at) and add or
+                    // remove photos (removed_at). Nothing else about them changes, and nothing is ever deleted.
+                    $"GRANT SELECT, INSERT ON albums, album_photos TO {quotedRole}",
+                    $"GRANT UPDATE (name, cover_photo_id, deleted_at, updated_at) ON albums TO {quotedRole}",
+                    $"GRANT UPDATE (added_at, removed_at) ON album_photos TO {quotedRole}",
 
                     // Downloads: create them, read them, and record a failed start; preparing them is worker work.
                     $"GRANT SELECT, INSERT ON prepared_downloads TO {quotedRole}",

@@ -114,6 +114,23 @@ az containerapp update -g rg-photo-prod -n ca-photo-worker --set-env-vars Worker
 Per download: at most 500 photos and 4 GB (`Worker:MaxPhotosPerDownload`, `Worker:MaxDownloadBytes`, and the
 same limits in the API's `Downloads` section, plus 3 downloads in preparation per person).
 
+## Albums
+
+Albums are shared by everyone signed in: anyone can create, rename and delete them, choose their cover, and add or
+remove photos ([ADR 0013](adr/0013-shared-albums-and-timeline.md)). Every change is in the audit trail
+(`album.*`). Nothing is deleted from the database, so a deleted album can be brought back with
+[break-glass database access](#break-glass-database-access):
+
+```sql
+SELECT id, name, deleted_at FROM albums WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC;
+UPDATE albums SET deleted_at = NULL WHERE id = '<album id>';
+```
+
+Photos taken out of an album keep their row with `album_photos.removed_at` set; clearing it puts them back.
+
+An album downloads as one ZIP named after it, within the download limits above. An album of more than 500 photos
+cannot be downloaded at once: select up to 500 of its photos ("Select all" stops at 500) and download those.
+
 ## Image processing limits
 
 - Only JPEG, PNG, GIF and WebP are decoded, for uploads and for archive files alike. Legacy files in other
@@ -128,7 +145,7 @@ same limits in the API's `Downloads` section, plus 3 downloads in preparation pe
 
 Admins are the GitHub accounts in Terraform (`github_users`). Everyone else is invited from the **People** page
 and signs in with a Google account; no GitHub account and no Terraform change are needed. Invited people are
-always **members** (browse, search, upload, download, edit descriptions), never admins. See
+always **members** (browse, search, upload, download, edit descriptions, make albums), never admins. See
 [ADR 0012](adr/0012-google-sign-in-for-invited-members.md).
 
 ### One-time setup: the Google OAuth client

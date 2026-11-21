@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using PhotoManager.Api;
+using PhotoManager.Api.Albums;
 using PhotoManager.Api.Auth;
 using PhotoManager.Api.Downloads;
 using PhotoManager.Api.Jobs;
@@ -95,6 +96,7 @@ var api = app.MapGroup("/api")
     .AddEndpointFilter<AntiforgeryValidationFilter>();
 api.MapAuthEndpoints();
 api.MapPhotoEndpoints();
+api.MapAlbumEndpoints();
 api.MapUploadEndpoints();
 api.MapDownloadEndpoints();
 api.MapJobEndpoints();

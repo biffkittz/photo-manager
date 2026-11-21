@@ -18,14 +18,15 @@ export function useDownload(pollIntervalMs = 1500, timeoutMs = 10 * 60 * 1000) {
   const lifetime = new AbortController()
   onBeforeUnmount(() => lifetime.abort())
 
-  async function download(photoIds: string[]): Promise<void> {
-    if (photoIds.length === 0 || state.value === 'preparing') {
+  /** Downloads selected photos (one original, or a ZIP), or a whole album (a ZIP named after it). */
+  async function download(target: string[] | { albumId: string }): Promise<void> {
+    if ((Array.isArray(target) && target.length === 0) || state.value === 'preparing') {
       return
     }
 
     state.value = 'preparing'
     try {
-      let current = await api.createDownload(photoIds)
+      let current = await api.createDownload(target)
       const deadline = Date.now() + timeoutMs
       while (current.status === 'Pending' && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, pollIntervalMs))

@@ -88,3 +88,130 @@ test('photos are deep-linkable', async ({ page }) => {
     page.getByRole('dialog', { name: 'woman and boy smiling on the beach' }),
   ).toBeVisible()
 })
+
+test('the timeline narrows the gallery to a year, then a month, in the order photos were taken', async ({
+  page,
+}) => {
+  await page.route(/\/api\/photos\/timeline\?/, (route) =>
+    route.fulfill({
+      json: [
+        { year: 2024, month: 7, count: 1 },
+        { year: 2024, month: 3, count: 4 },
+        { year: 2015, month: 6, count: 9 },
+      ],
+    }),
+  )
+  const lists: URLSearchParams[] = []
+  page.on('request', (request) => {
+    const url = new URL(request.url())
+    if (url.pathname === '/api/photos') lists.push(url.searchParams)
+  })
+  await page.goto('/gallery')
+
+  const timeline = page.getByRole('navigation', { name: 'Timeline' })
+  await expect(timeline.getByRole('link', { name: 'All years' })).toHaveAttribute(
+    'aria-current',
+    'page',
+  )
+  await timeline.getByRole('link', { name: '2024' }).click()
+  await expect(page).toHaveURL(/year=2024/)
+  await expect(page.getByRole('heading', { name: '2024 · 5 photos' })).toBeVisible()
+  // A year is listed by date taken whatever the sort setting, so the sort menu steps aside.
+  await expect(page.getByLabel('Sort photos')).toBeHidden()
+
+  await timeline
+    .getByRole('list', { name: 'Months of 2024' })
+    .getByRole('link', { name: 'Jul' })
+    .click()
+  await expect(page).toHaveURL(/year=2024&month=7/)
+  await expect(page.getByRole('heading', { name: 'July 2024 · 1 photo' })).toBeVisible()
+  const last = lists.at(-1)!
+  expect([last.get('year'), last.get('month'), last.get('sort')]).toEqual(['2024', '7', 'taken'])
+  expect(last.has('offset') || new Date().getTimezoneOffset() === 0).toBe(true)
+  await expectAccessible(page)
+
+  // The end of a month leads on to the next older one with photos; Back undoes it.
+  await page.getByRole('link', { name: 'Older: March 2024 →' }).click()
+  await expect(page.getByRole('heading', { name: 'March 2024 · 4 photos' })).toBeVisible()
+  await page.goBack()
+  await expect(page.getByRole('heading', { name: 'July 2024 · 1 photo' })).toBeVisible()
+  await timeline.getByRole('link', { name: 'All years' }).click()
+  await expect(page).toHaveURL(/\/gallery$/)
+  await expect(page.getByLabel('Sort photos')).toBeVisible()
+})
+
+test('On this day shows earlier years and the viewer steps through all of their photos', async ({
+  page,
+}) => {
+  const memory = (id: string, description: string, takenAt: string) => ({
+    ...photos[0],
+    id,
+    description,
+    takenAt,
+  })
+  const asked: URLSearchParams[] = []
+  await page.route(/\/api\/photos\/on-this-day\?/, (route) => {
+    asked.push(new URL(route.request().url()).searchParams)
+    return route.fulfill({
+      json: [
+        {
+          year: 2025,
+          yearsAgo: 1,
+          photos: [
+            memory('p7', 'first birthday cake', '2025-11-20T10:00:00Z'),
+            memory('p8', 'opening presents', '2025-11-20T11:00:00Z'),
+          ],
+        },
+        { year: 2019, yearsAgo: 7, photos: [memory('p9', 'first steps', '2019-11-20T09:00:00Z')] },
+      ],
+    })
+  })
+  await page.route(/\/api\/photos\/p[789]$/, (route) => {
+    const id = new URL(route.request().url()).pathname.split('/').at(-1)
+    const descriptions: Record<string, string> = {
+      p7: 'first birthday cake',
+      p8: 'opening presents',
+      p9: 'first steps',
+    }
+    return route.fulfill({
+      json: {
+        ...photos[0],
+        id,
+        description: descriptions[id!],
+        descriptionSource: 'Gemini',
+        descriptionState: 'Ready',
+        tags: [],
+        contentType: 'image/jpeg',
+        sizeBytes: 1234,
+        uploadedBy: 'octo',
+        status: 'Ready',
+        statusDetail: null,
+        encryptionFormat: 'V2',
+        source: 'Upload',
+      },
+    })
+  })
+  await page.goto('/gallery')
+
+  const memories = page.getByRole('region', { name: 'On this day' })
+  await expect(memories.getByRole('button')).toHaveCount(2)
+  const today = await page.evaluate(() => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  })
+  expect(asked.at(-1)?.get('date')).toBe(today)
+  await expectAccessible(page)
+
+  await memories.getByRole('button', { name: '1 year ago 2025 · 2 photos' }).click()
+  await expect(page.getByRole('dialog', { name: 'first birthday cake' })).toBeVisible()
+  await page.getByRole('button', { name: 'Next' }).click()
+  await expect(page.getByRole('dialog', { name: 'opening presents' })).toBeVisible()
+  await page.getByRole('button', { name: 'Next' }).click()
+  await expect(page.getByRole('dialog', { name: 'first steps' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Next' })).toBeDisabled()
+  await page.keyboard.press('Escape')
+
+  // Memories make way when looking for something.
+  await page.getByRole('searchbox', { name: 'Search photos' }).fill('snow')
+  await expect(memories).toBeHidden()
+})

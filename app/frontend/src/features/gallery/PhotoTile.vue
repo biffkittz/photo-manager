@@ -1,18 +1,12 @@
 <script setup lang="ts">
-import { computed, toRef } from 'vue'
-import { urls } from '@/api/endpoints'
+import { computed } from 'vue'
 import type { PhotoSummary } from '@/api/types'
-import { useRendition } from '@/composables/useRendition'
+import PhotoThumbnail from '@/components/PhotoThumbnail.vue'
 import { formatDate } from '@/utils/format'
 
 const props = defineProps<{ photo: PhotoSummary; selected: boolean }>()
 const emit = defineEmits<{ open: [id: string]; toggle: [id: string] }>()
 
-const src = computed(() => urls.thumbnail(props.photo.id, props.photo.renditionVersion))
-const { status, handleImageError } = useRendition(
-  src,
-  toRef(() => props.photo.renditionState),
-)
 const caption = computed(() => props.photo.description || props.photo.fileName)
 const alt = computed(() => props.photo.description || `Photo ${props.photo.fileName}`)
 </script>
@@ -25,21 +19,7 @@ const alt = computed(() => props.photo.description || `Photo ${props.photo.fileN
       :aria-label="`Open ${caption}`"
       @click="emit('open', photo.id)"
     >
-      <img
-        v-if="status === 'ready'"
-        :src="src"
-        :alt="alt"
-        loading="lazy"
-        decoding="async"
-        class="size-full object-cover"
-        @error="handleImageError"
-      />
-      <span
-        v-else
-        class="flex size-full items-center justify-center p-2 text-center text-xs text-muted"
-      >
-        {{ status === 'pending' ? 'Preparing preview...' : 'Preview unavailable' }}
-      </span>
+      <PhotoThumbnail :photo="photo" :alt="alt" />
     </button>
     <figcaption class="truncate px-2 py-1 text-xs" :title="caption">
       {{ caption }}

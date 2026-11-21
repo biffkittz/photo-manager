@@ -93,6 +93,39 @@ export interface PhotoPage {
   nextCursor: string | null
 }
 
+/** A year, or one month of it, that the gallery is narrowed to (the viewer's calendar). */
+export interface GalleryPeriod {
+  year: number
+  /** 1 to 12; absent for the whole year. */
+  month?: number
+}
+
+/** How many photos were taken (else uploaded) in one month of the viewer's calendar. */
+export interface TimelineMonth {
+  year: number
+  month: number
+  count: number
+}
+
+/** Photos taken on today's date in one earlier year. */
+export interface OnThisDayYear {
+  year: number
+  yearsAgo: number
+  photos: PhotoSummary[]
+}
+
+/** An album (shared by the whole family). */
+export interface AlbumSummary {
+  id: string
+  name: string
+  photoCount: number
+  /** Capture (else upload) date of its oldest and newest photo; null when empty. */
+  firstDate: string | null
+  lastDate: string | null
+  /** The chosen cover while it is in the album, else the first photo; null when empty. */
+  cover: PhotoSummary | null
+}
+
 export interface PhotoDetails extends PhotoSummary {
   descriptionSource: DescriptionSource | null
   descriptionState: ProcessingState
