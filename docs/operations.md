@@ -139,9 +139,15 @@ GitHub.
 1. In the [Google Cloud console](https://console.cloud.google.com/), create (or pick) a project for Photo
    Manager, open **Google Auth Platform** (formerly *OAuth consent screen*) and configure it: app name
    *Photo Manager*, your support email, audience **External**. Add no scopes beyond the basic ones (the app
-   asks only for `openid` and `email`).
-2. Publish the app (**Audience > Publish app**). While it is in *Testing*, only the test users you list there can
-   sign in. With only the basic scopes, Google does not require a verification review to publish.
+   asks only for `openid` and `email`). Leave the home page, privacy policy, terms of service and authorized
+   domain fields empty.
+2. **Leave the publishing status at *Testing*; do not publish, and add no test users.** Google makes an exception
+   for apps that ask only for name, email and profile (`openid`, `email`, `profile`): anyone with a Google account
+   can sign in, there is no unverified-app warning, and sign-ins do not expire after 7 days
+   ([Manage App Audience](https://support.google.com/cloud/answer/15549945)). Who gets in is decided by the
+   invites, not by Google. Publishing would require a public home page and privacy policy plus brand verification,
+   which only changes what Google's sign-in screen displays. If someone ever gets "Access blocked" from Google,
+   check that the client still asks only for these scopes and that the exception still exists.
 3. **Clients > Create client**: type **Web application**, authorized redirect URI exactly
    `https://photo.biffkittz.com/signin-google` (no JavaScript origins are needed). Copy the client id and secret.
    For local development, create a separate client with `http://localhost:5080/signin-google` and pass it to

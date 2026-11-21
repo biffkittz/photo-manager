@@ -111,7 +111,8 @@ throwaway keys from `scripts/dev-secrets.sh` in `dotnet user-secrets` and a giti
 
 - [ ] Production GitHub OAuth app created; all allowlisted accounts use 2FA.
 - [ ] If family members are invited: Google OAuth client with only the redirect URI
-  `https://photo.biffkittz.com/signin-google`, app published, both secrets in the web vault.
+  `https://photo.biffkittz.com/signin-google`, only the basic scopes, publishing status left at *Testing*
+  (docs/operations.md), both secrets in the web vault.
 - [ ] Bucket-scoped Wasabi key in Key Vault (not the account root key); bucket versioning stays on.
 - [ ] API key authentication enabled on the `photo.joqqs` namespace.
 - [ ] Gemini API project on the paid tier (or descriptions disabled).
