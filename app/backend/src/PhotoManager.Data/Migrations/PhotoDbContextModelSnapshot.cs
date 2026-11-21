@@ -388,6 +388,12 @@ namespace PhotoManager.Data.Migrations
                         .HasColumnType("character varying(32)")
                         .HasColumnName("encryption_format");
 
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("file_name");
+
                     b.Property<int?>("Height")
                         .HasColumnType("integer")
                         .HasColumnName("height");

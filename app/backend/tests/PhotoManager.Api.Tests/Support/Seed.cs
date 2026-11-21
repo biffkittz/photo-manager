@@ -21,7 +21,8 @@ internal static class Seed
                     Status = seed.Status,
                     EncryptionFormat = EncryptionFormat.LegacyV1,
                     ArchiveKey = $"2024-01-01/{id:N}.jpg.encrypted",
-                    OriginalFileName = seed.FileName ?? $"{id:N}.jpg",
+                    OriginalFileName = seed.OriginalFileName ?? seed.FileName ?? $"{id:N}.jpg",
+                    FileName = seed.FileName ?? $"{id:N}.jpg",
                     ContentType = "image/jpeg",
                     SizeBytes = 1024,
                     Description = seed.Description,
@@ -45,10 +46,12 @@ internal static class Seed
 /// <param name="TakenAt">Capture time, if known.</param>
 /// <param name="UploadedAt">Upload time (default: now).</param>
 /// <param name="Status">Lifecycle status.</param>
-/// <param name="FileName">Original filename (default: the id).</param>
+/// <param name="FileName">The name shown in the library (default: the id).</param>
+/// <param name="OriginalFileName">The name the photo arrived with (default: <paramref name="FileName"/>).</param>
 internal sealed record PhotoSeed(
     string? Description = null,
     DateTimeOffset? TakenAt = null,
     DateTimeOffset? UploadedAt = null,
     PhotoStatus Status = PhotoStatus.Ready,
-    string? FileName = null);
+    string? FileName = null,
+    string? OriginalFileName = null);

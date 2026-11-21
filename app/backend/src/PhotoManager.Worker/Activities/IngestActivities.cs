@@ -170,11 +170,8 @@ public sealed class IngestActivities(
         photo.LastSeenAt = time.GetUtcNow();
         if (input.Description is { } description)
         {
-            photo.Description = description.Description;
-            photo.DescriptionSource = DescriptionSource.Gemini;
-            photo.DescriptionModel = description.Model;
-            photo.SetTags(description.Tags);
-            photo.DescriptionState = ProcessingState.Ready;
+            // Named after the description from here on; the archive file keeps the uploaded name (docs/adr/0014).
+            photo.SetAiDescription(description.Description, description.Tags, description.Model);
         }
         else
         {

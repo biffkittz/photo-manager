@@ -85,12 +85,14 @@ public sealed class UploadService(
                     existing == PhotoStatus.Ready ? "This photo is already in the library." : "This photo is already being uploaded.");
             }
 
+            var fileName = FileNames.WithExtension(FileNames.Sanitize(clientFileName), detected.Extension);
             photo = new Photo
             {
                 Id = photoId,
                 Source = PhotoSource.Upload,
                 Status = PhotoStatus.Queued,
-                OriginalFileName = FileNames.WithExtension(FileNames.Sanitize(clientFileName), detected.Extension),
+                OriginalFileName = fileName,
+                FileName = fileName,
                 ContentType = detected.ContentType,
                 SizeBytes = size,
                 Sha256 = sha256,

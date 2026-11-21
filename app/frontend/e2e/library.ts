@@ -78,6 +78,7 @@ export async function mockLibrary(page: Page, photos: FakePhoto[], albums: FakeA
     return route.fulfill({
       json: {
         ...found,
+        originalFileName: found.fileName,
         descriptionSource: 'Gemini',
         descriptionState: 'Ready',
         tags: [],

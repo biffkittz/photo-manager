@@ -134,12 +134,12 @@ public sealed class RenditionActivities(
         db.Photos.AsNoTracking()
             .Where(p => p.Sha256 == sha256 && p.Id != photoId && p.Status == PhotoStatus.Ready)
             .OrderBy(p => p.UploadedAt)
-            .Select(p => (string?)p.OriginalFileName)
+            .Select(p => (string?)p.FileName) // as the library shows it
             .FirstOrDefaultAsync(cancellationToken);
 
-    private async Task MarkDuplicateAsync(Guid photoId, LoadedImage image, string? originalName, CancellationToken cancellationToken)
+    private async Task MarkDuplicateAsync(Guid photoId, LoadedImage image, string? copyName, CancellationToken cancellationToken)
     {
-        var detail = originalName is null ? "Identical to another photo in the library." : $"Identical to {originalName}.";
+        var detail = copyName is null ? "Identical to another photo in the library." : $"Identical to {copyName}.";
         detail = detail.Length > 500 ? detail[..500] : detail;
         var now = time.GetUtcNow();
         await db.Photos.Where(p => p.Id == photoId && p.Status == PhotoStatus.Ready).ExecuteUpdateAsync(

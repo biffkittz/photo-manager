@@ -4,7 +4,7 @@ namespace PhotoManager.Api.Contracts;
 
 /// <summary>A gallery tile.</summary>
 /// <param name="Id">Photo id.</param>
-/// <param name="FileName">Original filename.</param>
+/// <param name="FileName">The name shown in the library (after the AI description, once there is one).</param>
 /// <param name="Description">Description, if any.</param>
 /// <param name="UploadedAt">Upload time.</param>
 /// <param name="TakenAt">Capture time, if known.</param>

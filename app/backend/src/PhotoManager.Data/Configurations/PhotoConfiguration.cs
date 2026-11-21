@@ -18,6 +18,7 @@ internal sealed class PhotoConfiguration : IEntityTypeConfiguration<Photo>
         builder.Property(p => p.ArchiveKey).HasMaxLength(1024);
         builder.Property(p => p.ArchiveETag).HasMaxLength(128);
         builder.Property(p => p.OriginalFileName).HasMaxLength(FileNames.MaxLength).IsRequired();
+        builder.Property(p => p.FileName).HasMaxLength(FileNames.MaxLength).IsRequired();
         builder.Property(p => p.ContentType).HasMaxLength(100).IsRequired();
         builder.Property(p => p.Sha256).HasMaxLength(64).IsFixedLength();
         builder.Property(p => p.Description).HasMaxLength(500);

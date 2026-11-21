@@ -29,6 +29,9 @@ public sealed class PipelineTests(LocalStackFixture stack)
         Assert.StartsWith("v2/", photo.ArchiveKey, StringComparison.Ordinal);
         Assert.Equal(ProcessingState.Ready, photo.DescriptionState);
         Assert.Contains("placeholder", photo.Description, StringComparison.Ordinal);
+        // Named after its AI description from now on; the archive keeps the name it was uploaded with.
+        Assert.Matches("^local_development_placeholder_for_a_(small|large)_photo\\.jpg$", photo.FileName);
+        Assert.Equal("Beach Day.JPG", photo.OriginalFileName);
         Assert.Equal(ProcessingState.Ready, photo.RenditionState);
         Assert.Equal((1600, 1200), (photo.Width, photo.Height));
         Assert.Equal(new DateTimeOffset(2024, 7, 4, 18, 22, 1, TimeSpan.Zero), photo.TakenAt);
@@ -65,6 +68,7 @@ public sealed class PipelineTests(LocalStackFixture stack)
         Assert.Equal(PhotoStatus.Ready, photo.Status);
         Assert.Equal(ProcessingState.Ready, photo.RenditionState);
         Assert.Null(photo.Description);
+        Assert.Equal("no-ai.jpg", photo.FileName);
         Assert.Equal(ProcessingState.NotStarted, photo.DescriptionState); // picked up by "Generate missing descriptions"
     }
 
@@ -136,12 +140,18 @@ public sealed class PipelineTests(LocalStackFixture stack)
         Assert.NotNull(legacy.Sha256);
 
         await stack.Workflows.StartDescribeAsync(legacy.Id);
-        await stack.WaitForAsync(db => db.Photos.AsNoTracking().SingleAsync(p => p.Id == legacy.Id), p => p.DescriptionState == ProcessingState.Ready);
+        var described = await stack.WaitForAsync(db => db.Photos.AsNoTracking().SingleAsync(p => p.Id == legacy.Id), p => p.DescriptionState == ProcessingState.Ready);
 
-        // A ZIP of the legacy photo plus a fresh upload: originals decrypted by the worker, re-encrypted for the web tier.
+        // "Describe" renames the photo after its description; the name from the object key is kept and still searchable.
+        Assert.Matches("^local_development_placeholder_for_a_(small|large)_photo\\.jpg$", described.FileName);
+        Assert.Equal(legacy.OriginalFileName, described.OriginalFileName);
+        Assert.Contains("beach", described.SearchKeywords, StringComparison.Ordinal);
+
+        // A ZIP of the legacy photo plus a fresh upload (not described, so it keeps its name): originals decrypted by
+        // the worker, re-encrypted for the web tier, and named as in the library.
         var uploadJpeg = TestImages.Jpeg(640, 480);
         var uploaded = await StageUploadAsync(uploadJpeg, "zip-me.jpg");
-        await stack.Workflows.StartIngestAsync(uploaded);
+        await stack.Workflows.StartIngestAsync(uploaded, skipDescription: true);
         await stack.WaitForAsync(db => db.Photos.AsNoTracking().SingleAsync(p => p.Id == uploaded), p => p.Status == PhotoStatus.Ready);
 
         var downloadId = Guid.CreateVersion7();
@@ -159,8 +169,8 @@ public sealed class PipelineTests(LocalStackFixture stack)
         await zipPlain.CopyToAsync(zipBytes, Ct);
         zipBytes.Position = 0;
         using var zip = new ZipArchive(zipBytes, ZipArchiveMode.Read);
-        Assert.Equal(2, zip.Entries.Count);
-        var legacyEntry = zip.Entries.Single(e => e.Name.Contains("beach_day", StringComparison.Ordinal));
+        Assert.Equal([described.FileName, "zip-me.jpg"], zip.Entries.Select(e => e.Name).Order(StringComparer.Ordinal));
+        var legacyEntry = zip.Entries.Single(e => e.Name == described.FileName);
         using var entryCopy = new MemoryStream();
         await using (var entryStream = await legacyEntry.OpenAsync(Ct))
         {
@@ -196,6 +206,11 @@ public sealed class PipelineTests(LocalStackFixture stack)
         Assert.Single(recovered, p => p.Status == PhotoStatus.Ready);
         Assert.Single(recovered, p => p.Status == PhotoStatus.Duplicate);
         Assert.All(recovered, p => Assert.Equal(original.Sha256, p.Sha256));
+
+        // Names come back too: after the sealed AI description, or the sealed uploaded name when there is none.
+        var rebuilt = recovered.Single(p => p.Id == first);
+        Assert.Equal((original.FileName, original.OriginalFileName), (rebuilt.FileName, rebuilt.OriginalFileName));
+        Assert.Equal("twin-copy.jpg", recovered.Single(p => p.Id == twin).FileName);
     }
 
     [Fact]
@@ -284,6 +299,7 @@ public sealed class PipelineTests(LocalStackFixture stack)
                 Source = PhotoSource.Upload,
                 Status = PhotoStatus.Queued,
                 OriginalFileName = FileNames.WithExtension(FileNames.Sanitize(fileName), ".jpg"),
+                FileName = FileNames.WithExtension(FileNames.Sanitize(fileName), ".jpg"),
                 ContentType = "image/jpeg",
                 UploadedAt = DateTimeOffset.UtcNow,
                 UploadedBy = "integration",

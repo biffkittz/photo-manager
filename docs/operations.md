@@ -323,7 +323,7 @@ URLs and messages, disable session replay, and note the processor in this docume
 
 | Scenario | Recovery |
 |---|---|
-| Database lost/corrupted | Point-in-time restore (14 days) of the flexible server; or create an empty database, run the migration job and **Re-index archive**: v2 photos recover filenames and descriptions from their sealed metadata, legacy photos from their object keys. Then regenerate renditions |
+| Database lost/corrupted | Point-in-time restore (14 days) of the flexible server; or create an empty database, run the migration job and **Re-index archive**: v2 photos recover filenames and descriptions from their sealed metadata (and are named after a sealed AI description again), legacy photos from their object keys. Then regenerate renditions; legacy photos described after their import need *Generate missing descriptions* again to get their names back |
 | Renditions lost or corrupted | A rendition that is missing, corrupted or encrypted with a retired web key is regenerated automatically the next time someone views it. For a bulk rebuild, reset the state (`UPDATE photos SET rendition_state = 'NotStarted'`) and run **Generate missing thumbnails** |
 | Blob staging lost | Only in-flight uploads are affected: they fail and show **Retry** on the Upload page; if the staged copy is gone, the user is asked to upload the file again |
 | Key Vault deleted | Soft delete + purge protection (90 days): `az keyvault recover` |

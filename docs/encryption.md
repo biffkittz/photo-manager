@@ -78,7 +78,9 @@ PBKDF2 runs once per worker process; it is recorded in every header, so changing
 Archive files carry sealed JSON metadata (`EmbeddedPhotoMetadata`): photo id, original filename, content type,
 size, SHA-256, AI description and tags, capture date, upload date and uploader. The bucket is therefore
 self-describing: re-indexing a bucket into an empty database recovers names and descriptions of every v2 file.
-Object keys (`v2/yyyy/MM/<photo id>.pmv2`) reveal nothing about content.
+The filename sealed in a file is the one it was uploaded with; the library's name made from the AI description
+([ADR 0014](adr/0014-photos-named-after-their-description.md)) is derived again from the sealed description, so
+renaming never rewrites an archive file. Object keys (`v2/yyyy/MM/<photo id>.pmv2`) reveal nothing about content.
 
 ## Where each key is used
 

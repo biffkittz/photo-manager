@@ -57,6 +57,7 @@ async function mockGallery(page: Page): Promise<void> {
     return route.fulfill({
       json: {
         ...photo,
+        originalFileName: photo.fileName,
         descriptionSource: 'Gemini',
         descriptionState: 'Ready',
         tags: ['family', 'garden'],

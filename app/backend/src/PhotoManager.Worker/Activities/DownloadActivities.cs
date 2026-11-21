@@ -121,9 +121,10 @@ public sealed class DownloadActivities(
             download.Status = DownloadStatus.Ready;
             download.BlobName = blobName;
             download.SizeBytes = plaintextLength;
-            // A ZIP keeps the name it was requested with (the album's, or a dated "photos-..." name); the web tier
-            // sanitizes it again when it serves the file.
-            download.FileName = single ? photos[0].OriginalFileName : download.FileName;
+            // A single photo is named as in the library (after its AI description, if it has one); a ZIP keeps the
+            // name it was requested with (the album's, or a dated "photos-..." name). The web tier sanitizes it again
+            // when it serves the file.
+            download.FileName = single ? photos[0].FileName : download.FileName;
             download.ContentType = single ? photos[0].ContentType : "application/zip";
             download.SkippedCount = download.PhotoIds.Count - photos.Count;
             download.ExpiresAt = now + options.Value.DownloadLifetime;
@@ -204,7 +205,7 @@ public sealed class DownloadActivities(
                 var photo = photos[i];
 
                 // Photos are already compressed; storing avoids burning CPU for no gain.
-                var entry = zip.CreateEntry(UniqueName(photo.OriginalFileName, usedNames), CompressionLevel.NoCompression);
+                var entry = zip.CreateEntry(UniqueName(photo.FileName, usedNames), CompressionLevel.NoCompression);
                 entry.LastWriteTime = ZipTimestamp(photo.TakenAt ?? photo.UploadedAt);
                 var entryStream = await entry.OpenAsync(cancellationToken);
                 await using (entryStream)

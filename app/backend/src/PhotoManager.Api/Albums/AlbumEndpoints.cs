@@ -64,7 +64,7 @@ public static class AlbumEndpoints
                 .OrderBy(p => p.Id == a.CoverPhotoId ? 0 : 1)
                 .ThenBy(p => p.SortDate)
                 .ThenBy(p => p.Id)
-                .Select(p => new PhotoSummary(p.Id, p.OriginalFileName, p.Description, p.UploadedAt, p.TakenAt, p.Width, p.Height, p.RenditionState, p.RenditionVersion))
+                .Select(p => new PhotoSummary(p.Id, p.FileName, p.Description, p.UploadedAt, p.TakenAt, p.Width, p.Height, p.RenditionState, p.RenditionVersion))
                 .FirstOrDefault()));
 
     // Most recently changed first: the album someone is putting together stays at the top.

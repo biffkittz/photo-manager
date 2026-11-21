@@ -35,7 +35,7 @@ const actions: { kind: JobKind; title: string; description: string }[] = [
     kind: 'BackfillDescriptions',
     title: 'Generate missing descriptions',
     description:
-      'Ask Gemini to describe photos that have no description yet (uses Gemini API quota).',
+      'Ask Gemini to describe photos that have no description yet and name their files after the descriptions (uses Gemini API quota).',
   },
 ]
 

@@ -163,6 +163,7 @@ public sealed class ApiTests(ApiFactory factory)
         Assert.DoesNotContain(jpeg[100..140], Chunks(staged));
         var photo = await factory.WithDbAsync(db => db.Photos.AsNoTracking().SingleAsync(p => p.Id == body.PhotoId, Ct));
         Assert.Equal("holiday.jpeg", photo.OriginalFileName);
+        Assert.Equal("holiday.jpeg", photo.FileName); // until an AI description renames it (a worker's job)
         Assert.Equal(PhotoStatus.Queued, photo.Status);
         Assert.Equal("user1002", photo.UploadedBy);
         await factory.Temporal.Received().StartWorkflowAsync(
@@ -580,7 +581,7 @@ public sealed class ApiTests(ApiFactory factory)
         var takenAt = new DateTimeOffset(2024, 7, 4, 18, 22, 1, TimeSpan.FromHours(-4));
         await factory.WithDbAsync(async db =>
         {
-            db.Photos.Add(new Photo { Id = id, Source = PhotoSource.Archive, Status = PhotoStatus.Ready, EncryptionFormat = EncryptionFormat.LegacyV1, ArchiveKey = $"2024-07-04/{id:N}.jpg.encrypted", OriginalFileName = "offset.jpg", ContentType = "image/jpeg", UploadedAt = DateTimeOffset.UtcNow, TakenAt = takenAt });
+            db.Photos.Add(new Photo { Id = id, Source = PhotoSource.Archive, Status = PhotoStatus.Ready, EncryptionFormat = EncryptionFormat.LegacyV1, ArchiveKey = $"2024-07-04/{id:N}.jpg.encrypted", OriginalFileName = "offset.jpg", FileName = "offset.jpg", ContentType = "image/jpeg", UploadedAt = DateTimeOffset.UtcNow, TakenAt = takenAt });
             return await db.SaveChangesAsync(Ct);
         });
 
@@ -649,6 +650,7 @@ public sealed class ApiTests(ApiFactory factory)
                 EncryptionFormat = EncryptionFormat.LegacyV1,
                 ArchiveKey = $"2024-01-01/{Guid.NewGuid():N}.jpg.encrypted",
                 OriginalFileName = fileName,
+                FileName = fileName,
                 ContentType = "image/jpeg",
                 SizeBytes = sizeBytes,
                 Description = description,

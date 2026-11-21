@@ -38,8 +38,19 @@ public sealed partial class Photo : ITimestamped
     /// <summary>Gets or sets the object ETag, used by re-indexing to detect replaced objects.</summary>
     public string? ArchiveETag { get; set; }
 
-    /// <summary>Gets or sets the sanitized original filename.</summary>
+    /// <summary>
+    /// Gets or sets the sanitized name the photo arrived with (the uploaded file, or the name in a legacy object key).
+    /// Never changed; still searchable after the photo is renamed. v2 archive files carry it in their sealed metadata.
+    /// </summary>
     public string OriginalFileName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the name shown in the library and given to downloads: <see cref="OriginalFileName"/> until an AI
+    /// description renames the photo after itself (<see cref="SetAiDescription"/>, docs/adr/0014). An insert that
+    /// leaves it out (the previous release, during a rollout or after a rollback) gets <see cref="OriginalFileName"/>
+    /// from a database trigger (migration <c>AddPhotoFileName</c>).
+    /// </summary>
+    public required string FileName { get; set; }
 
     /// <summary>Gets or sets the MIME type of the original.</summary>
     public string ContentType { get; set; } = string.Empty;
@@ -63,9 +74,10 @@ public sealed partial class Photo : ITimestamped
     public List<string> Tags { get; set; } = [];
 
     /// <summary>
-    /// Gets or sets extra full-text search terms: the tags plus the words of the filename. Legacy filenames
+    /// Gets or sets extra full-text search terms: the tags plus the words of both file names. Legacy filenames
     /// are often descriptive ("woman_and_boy_smiling_on_beach.jpg", written by protect.ps1's rename feature),
-    /// but the PostgreSQL parser treats a whole filename as one token, so its words are split out here.
+    /// as are names made from descriptions, but the PostgreSQL parser treats a whole filename as one token, so
+    /// their words are split out here.
     /// Maintained by <see cref="RefreshSearchKeywords"/>, which <see cref="PhotoDbContext"/> calls on save.
     /// </summary>
     public string SearchKeywords { get; set; } = string.Empty;
@@ -138,18 +150,38 @@ public sealed partial class Photo : ITimestamped
         RefreshSearchKeywords();
     }
 
-    /// <summary>Recomputes <see cref="SearchKeywords"/> from the tags and filename.</summary>
-    public void RefreshSearchKeywords() => SearchKeywords = BuildSearchKeywords(Tags, OriginalFileName);
+    /// <summary>
+    /// Stores a description written by the AI model, with its tags, and names the photo after it
+    /// (<see cref="FileNames.FromDescription"/>, docs/adr/0014). Descriptions written by people never rename a photo.
+    /// </summary>
+    /// <param name="description">The sanitized description.</param>
+    /// <param name="tags">The sanitized tags.</param>
+    /// <param name="model">The model that wrote it, when known.</param>
+    public void SetAiDescription(string description, IEnumerable<string> tags, string? model)
+    {
+        Description = description;
+        DescriptionSource = Core.Domain.DescriptionSource.Gemini;
+        DescriptionModel = model;
+        DescriptionState = ProcessingState.Ready;
+        FileName = FileNames.FromDescription(description, OriginalFileName) ?? FileName;
+        SetTags(tags);
+    }
 
-    /// <summary>Builds the search keywords for the given tags and filename.</summary>
+    /// <summary>Recomputes <see cref="SearchKeywords"/> from the tags and file names.</summary>
+    public void RefreshSearchKeywords() => SearchKeywords = BuildSearchKeywords(Tags, OriginalFileName, FileName);
+
+    /// <summary>Builds the search keywords for the given tags and file names.</summary>
     /// <param name="tags">Tags.</param>
-    /// <param name="fileName">Original filename.</param>
+    /// <param name="fileNames">File names whose words are added (each word once).</param>
     /// <returns>Space-separated keywords, length-capped.</returns>
-    public static string BuildSearchKeywords(IEnumerable<string> tags, string? fileName)
+    public static string BuildSearchKeywords(IEnumerable<string> tags, params IEnumerable<string?> fileNames)
     {
         ArgumentNullException.ThrowIfNull(tags);
-        var words = NonWordCharacters().Split(Path.GetFileNameWithoutExtension(fileName ?? string.Empty))
-            .Where(w => w.Length > 1);
+        ArgumentNullException.ThrowIfNull(fileNames);
+        var words = fileNames
+            .SelectMany(name => NonWordCharacters().Split(Path.GetFileNameWithoutExtension(name ?? string.Empty)))
+            .Where(w => w.Length > 1)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
         var keywords = string.Join(' ', tags.Concat(words));
         return keywords.Length <= MaxSearchKeywordsLength ? keywords : keywords[..MaxSearchKeywordsLength];
     }

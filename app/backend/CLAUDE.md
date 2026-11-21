@@ -63,6 +63,12 @@ never read or print it).
   (`AlbumEndpoints.Summaries`). Workers never read albums: an album download stores its photo ids and ZIP name.
 - Dates grouped for people (timeline, "On this day") use the viewer's UTC offset (`PhotoQueries.TryUtcOffset`),
   like the dates the SPA prints.
+- Every AI description renames the photo (docs/adr/0014): store one only through `Photo.SetAiDescription`, which
+  sets `file_name` (shown and downloaded) with `FileNames.FromDescription`. `original_file_name` (the name it
+  arrived with, sealed in v2 files) never changes and stays searchable. Descriptions written by people never
+  rename a photo, and the web tier's database role cannot change either name. A trigger fills `file_name` for
+  inserts that leave it out (older releases during a rollout or rollback): keep migrations runnable by the
+  previous release (docs/deployment.md).
 - Admins exist only in configuration (`Auth:Users`, GitHub). Members invited from the People page sign in with
   Google, are recognized only by the Google account id bound when they accept, and are always plain members.
 - Anything that records state and then starts a workflow must undo that state if Temporal is unreachable

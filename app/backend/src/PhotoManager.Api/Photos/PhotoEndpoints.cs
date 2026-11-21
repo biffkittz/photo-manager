@@ -177,7 +177,7 @@ public static class PhotoEndpoints
             .Select(x => new
             {
                 x.Local.Year,
-                Summary = new PhotoSummary(x.Photo.Id, x.Photo.OriginalFileName, x.Photo.Description, x.Photo.UploadedAt, x.Photo.TakenAt, x.Photo.Width, x.Photo.Height, x.Photo.RenditionState, x.Photo.RenditionVersion),
+                Summary = new PhotoSummary(x.Photo.Id, x.Photo.FileName, x.Photo.Description, x.Photo.UploadedAt, x.Photo.TakenAt, x.Photo.Width, x.Photo.Height, x.Photo.RenditionState, x.Photo.RenditionVersion),
             })
             .ToListAsync(ct);
 
@@ -390,6 +390,6 @@ public static class PhotoEndpoints
     }
 
     private static PhotoDetails ToDetails(Photo p) =>
-        new(p.Id, p.OriginalFileName, p.Description, p.DescriptionSource, p.DescriptionState, p.Tags, p.ContentType, p.SizeBytes, p.Width, p.Height,
-            p.TakenAt, p.UploadedAt, p.UploadedBy, p.Status, p.StatusDetail, p.RenditionState, p.RenditionVersion, p.EncryptionFormat, p.Source);
+        new(p.Id, p.FileName, p.OriginalFileName, p.Description, p.DescriptionSource, p.DescriptionState, p.Tags, p.ContentType, p.SizeBytes, p.Width,
+            p.Height, p.TakenAt, p.UploadedAt, p.UploadedBy, p.Status, p.StatusDetail, p.RenditionState, p.RenditionVersion, p.EncryptionFormat, p.Source);
 }

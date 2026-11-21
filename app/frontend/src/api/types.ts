@@ -127,6 +127,8 @@ export interface AlbumSummary {
 }
 
 export interface PhotoDetails extends PhotoSummary {
+  /** The name the photo arrived with; `fileName` follows its AI description once it has one. */
+  originalFileName: string
   descriptionSource: DescriptionSource | null
   descriptionState: ProcessingState
   tags: string[]

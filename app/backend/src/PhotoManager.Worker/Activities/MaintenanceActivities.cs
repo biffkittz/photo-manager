@@ -331,6 +331,7 @@ public sealed class MaintenanceActivities(
             ArchiveSizeBytes = item.Size,
             ArchiveETag = item.ETag,
             OriginalFileName = fileName,
+            FileName = fileName,
             ContentType = ArchiveObjectKeys.GuessContentType(fileName),
             UploadedAt = ArchiveObjectKeys.LegacyUploadDate(item.Key) ?? item.LastModified,
             DescriptionState = ProcessingState.NotStarted,
@@ -368,6 +369,7 @@ public sealed class MaintenanceActivities(
             logger.LogWarning("Archive object for photo {PhotoId} is too small to be a v2 file ({Size} bytes)", photoId, item.Size);
         }
 
+        var originalFileName = FileNames.Sanitize(metadata?.OriginalFileName ?? $"{photoId:N}");
         var photo = new Photo
         {
             Id = photoId,
@@ -377,7 +379,8 @@ public sealed class MaintenanceActivities(
             ArchiveKey = item.Key,
             ArchiveSizeBytes = item.Size,
             ArchiveETag = item.ETag,
-            OriginalFileName = FileNames.Sanitize(metadata?.OriginalFileName ?? $"{photoId:N}"),
+            OriginalFileName = originalFileName,
+            FileName = originalFileName,
             ContentType = metadata?.ContentType ?? "application/octet-stream",
             SizeBytes = metadata?.SizeBytes,
             Sha256 = metadata?.Sha256,
@@ -389,11 +392,10 @@ public sealed class MaintenanceActivities(
             LastSeenAt = now,
         };
 
+        // The sealed description was written by the AI during upload, so the photo is named after it as it was then.
         if (!string.IsNullOrEmpty(metadata?.Description))
         {
-            photo.Description = metadata.Description;
-            photo.DescriptionSource = DescriptionSource.Gemini;
-            photo.SetTags(metadata.Tags);
+            photo.SetAiDescription(metadata.Description, metadata.Tags, model: null);
         }
 
         return photo;

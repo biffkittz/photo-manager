@@ -110,6 +110,11 @@ descriptions off on the Uploads page (`?describe=false`, remembered per browser)
 leaves the photo "not started", to be described later with the photo's *Describe with AI* button or **Generate
 missing descriptions**. A description added later is stored in the database only, not sealed in the file.
 
+Every AI description also renames the photo after itself (`dog_running_in_the_snow.jpg`): `photos.file_name` is
+the name the library shows and downloads use, while `original_file_name`, the name the photo arrived with, never
+changes and stays searchable. Names written by people do not rename photos, and the archive keeps the uploaded
+name. See [ADR 0014](adr/0014-photos-named-after-their-description.md).
+
 ### Viewing
 
 Gallery tiles load `GET /api/photos/{id}/thumbnail?v={version}` directly into `<img>`. The API reads the

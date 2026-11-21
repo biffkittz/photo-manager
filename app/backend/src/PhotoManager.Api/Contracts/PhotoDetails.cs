@@ -5,7 +5,8 @@ namespace PhotoManager.Api.Contracts;
 
 /// <summary>Full metadata of one photo.</summary>
 /// <param name="Id">Photo id.</param>
-/// <param name="FileName">Original filename.</param>
+/// <param name="FileName">The name shown and given to downloads (after the AI description, once there is one).</param>
+/// <param name="OriginalFileName">The name the photo arrived with.</param>
 /// <param name="Description">Description.</param>
 /// <param name="DescriptionSource">Who wrote the description.</param>
 /// <param name="DescriptionState">Description availability.</param>
@@ -26,6 +27,7 @@ namespace PhotoManager.Api.Contracts;
 public sealed record PhotoDetails(
     Guid Id,
     string FileName,
+    string OriginalFileName,
     string? Description,
     DescriptionSource? DescriptionSource,
     ProcessingState DescriptionState,

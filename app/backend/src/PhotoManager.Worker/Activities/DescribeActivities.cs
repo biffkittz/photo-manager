@@ -42,7 +42,10 @@ public sealed class DescribeActivities(
         }
     }
 
-    /// <summary>Describes an archived photo (backfill or user-requested regeneration) and stores the result.</summary>
+    /// <summary>
+    /// Describes an archived photo (backfill or user-requested regeneration), stores the result and names the photo
+    /// after it.
+    /// </summary>
     /// <param name="input">The photo, and whether a description written by a person must be kept.</param>
     /// <returns>A task that completes when the description is stored (or deliberately not stored).</returns>
     [Activity("DescribeArchivedPhoto")]
@@ -70,11 +73,8 @@ public sealed class DescribeActivities(
                 return;
             }
 
-            photo.Description = result.Description;
-            photo.DescriptionSource = DescriptionSource.Gemini;
-            photo.DescriptionModel = result.Model;
-            photo.SetTags(result.Tags);
-            photo.DescriptionState = ProcessingState.Ready;
+            // Also renames the photo after its new description (docs/adr/0014).
+            photo.SetAiDescription(result.Description, result.Tags, result.Model);
             await db.SaveChangesAsync(ct);
         }
         catch (Exception ex) when (ActivityErrors.TryTranslate(ex, out var failure))

@@ -99,6 +99,49 @@ public sealed class DomainHelperTests
         Assert.EndsWith(".jpeg", longJpeg, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("woman and boy smiling on the beach", "IMG_1234.JPG", "woman_and_boy_smiling_on_the_beach.jpg")]
+    [InlineData("Sunset Over The LAKE", "DSC_0042.JPEG", "sunset_over_the_lake.jpeg")]
+    [InlineData("3 kids on 2 bikes", "a.webp", "3_kids_on_2_bikes.webp")]
+    [InlineData("children's birthday party", "x.jpg", "childrens_birthday_party.jpg")]
+    [InlineData("grandma\u2019s garden", "x.jpg", "grandmas_garden.jpg")]
+    [InlineData("café crème on a table", "x.jpg", "café_crème_on_a_table.jpg")]
+    [InlineData("cafe\u0301 au lait", "x.jpg", "cafe\u0301_au_lait.jpg")]
+    [InlineData("dog looking up at", "x.jpg", "dog_looking_up_at.jpg")] // only a shortened name loses trailing filler words
+    // Shortened at a word to 60 characters at most, without the "in" it would have ended on.
+    [InlineData("grandparents and grandchildren having a picnic together in the park on a sunny afternoon", "x.png", "grandparents_and_grandchildren_having_a_picnic_together.png")]
+    // Untrusted model output: separators, dots, quotes and bidi overrides cannot survive into the name.
+    [InlineData("mother/daughter: ../../etc \"hike\"?", "trip.jpeg", "mother_daughter_etc_hike.jpeg")]
+    [InlineData("photo\u202Egpj.exe", "x.jpg", "photo_gpj_exe.jpg")]
+    [InlineData("con", "x.jpg", "con_photo.jpg")]
+    [InlineData("LPT1", "x.jpg", "lpt1_photo.jpg")]
+    [InlineData("com", "x.jpg", "com.jpg")]
+    // Only a plain extension is carried over.
+    [InlineData("sunset", "0f8fad5bd9cb469fa165708167e1fc33", "sunset")]
+    [InlineData("sunset", "holiday.final version", "sunset")]
+    [InlineData("sunset", null, "sunset")]
+    // Nothing to name the photo after.
+    [InlineData("🌅 🌊 !!!", "x.jpg", null)]
+    [InlineData("   ", "x.jpg", null)]
+    [InlineData(null, "x.jpg", null)]
+    public void Names_photos_after_their_description(string? description, string? currentFileName, string? expected)
+    {
+        var name = FileNames.FromDescription(description, currentFileName);
+
+        Assert.Equal(expected, name);
+        if (name is not null)
+        {
+            Assert.Equal(name, FileNames.Sanitize(name));
+            Assert.True(Path.GetFileNameWithoutExtension(name).Length <= FileNames.MaxDescriptiveStemLength);
+        }
+    }
+
+    [Fact]
+    public void A_description_that_is_one_overlong_word_is_cut()
+    {
+        Assert.Equal(new string('a', FileNames.MaxDescriptiveStemLength) + ".jpg", FileNames.FromDescription(new string('a', 70), "x.jpg"));
+    }
+
     [Fact]
     public void Archive_keys_only_belong_to_the_photo_they_were_written_for()
     {

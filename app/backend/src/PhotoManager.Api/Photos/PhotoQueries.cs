@@ -26,7 +26,7 @@ internal static class PhotoQueries
 
     /// <summary>Projects a photo to a gallery tile inside a query.</summary>
     public static readonly Expression<Func<Photo, PhotoSummary>> Summary = p =>
-        new PhotoSummary(p.Id, p.OriginalFileName, p.Description, p.UploadedAt, p.TakenAt, p.Width, p.Height, p.RenditionState, p.RenditionVersion);
+        new PhotoSummary(p.Id, p.FileName, p.Description, p.UploadedAt, p.TakenAt, p.Width, p.Height, p.RenditionState, p.RenditionVersion);
 
     private static readonly Func<Photo, PhotoSummary> CompiledSummary = Summary.Compile();
 
@@ -56,7 +56,10 @@ internal static class PhotoQueries
             : null;
     }
 
-    /// <summary>Full-text search over description, filename and tags, plus a plain filename match.</summary>
+    /// <summary>
+    /// Full-text search over description, file names and tags, plus a plain match on either file name (the one shown,
+    /// and the one the photo arrived with).
+    /// </summary>
     /// <param name="query">Photos to filter.</param>
     /// <param name="q">Search text (validated by <see cref="ValidateSearch"/>); blank means everything.</param>
     /// <returns>The matching photos.</returns>
@@ -71,6 +74,7 @@ internal static class PhotoQueries
         var pattern = $"%{EscapeLike(text)}%";
         return query.Where(p =>
             p.SearchVector.Matches(EF.Functions.WebSearchToTsQuery("english", text))
+            || EF.Functions.ILike(p.FileName, pattern, "\\")
             || EF.Functions.ILike(p.OriginalFileName, pattern, "\\"));
     }
 

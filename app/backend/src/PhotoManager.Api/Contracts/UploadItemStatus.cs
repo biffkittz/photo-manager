@@ -4,7 +4,7 @@ namespace PhotoManager.Api.Contracts;
 
 /// <summary>Progress of one uploaded photo through ingestion.</summary>
 /// <param name="PhotoId">Photo id.</param>
-/// <param name="FileName">Original filename.</param>
+/// <param name="FileName">The name the photo was uploaded with.</param>
 /// <param name="Status">Lifecycle status.</param>
 /// <param name="StatusDetail">Explanation for failures/duplicates.</param>
 /// <param name="Description">Description once generated.</param>

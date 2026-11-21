@@ -49,6 +49,7 @@ async function onRetry(localId: string): Promise<void> {
       <span>
         Describe photos with AI (Gemini)
         <span class="block text-muted">
+          Described photos are named after their description, such as dog_running_in_the_snow.jpg.
           Turn off to store photos without a description, for example when Gemini is busy: uploads
           then finish without waiting for it. They can be described later from the photo page or
           with "Generate missing descriptions".

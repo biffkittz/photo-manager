@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /**
  * Photo viewer (nested route /gallery/photos/:id or /albums/:albumId/photos/:id, so photos are deep-linkable).
- * Shows the large preview, metadata, description editing, AI re-description, original download and adding to an
- * album (and, in an album, making the photo its cover). Left/right arrow keys, the Previous/Next buttons and, on
+ * Shows the large preview, metadata, description editing, AI re-description (which also renames the photo after the
+ * new description), original download and adding to an album (and, in an album, making the photo its cover). Left/right arrow keys, the Previous/Next buttons and, on
  * touch screens, swiping the photo go to the previous/next photo of the list it was opened from.
  *
  * Layout: on phones and tablets the photo spans the width at its own aspect ratio (at most 70% of the screen
@@ -62,6 +62,11 @@ const addingToAlbum = ref(false)
 const album = computed(() => navigation?.album?.value)
 const updateAlbum = useUpdateAlbum()
 const previewUrl = computed(() => urls.preview(props.id, photo.value?.renditionVersion ?? 0))
+
+/** A file name in pieces that each end at an underscore, so a long name can wrap between its words. */
+function nameParts(name: string): string[] {
+  return name.split('_').map((part, i, all) => (i < all.length - 1 ? `${part}_` : part))
+}
 const { status: previewStatus, handleImageError } = useRendition(
   previewUrl,
   toRef(() => photo.value?.renditionState),
@@ -185,7 +190,10 @@ async function useAsCover(): Promise<void> {
 async function describeAgain(): Promise<void> {
   try {
     await regenerate.mutateAsync(props.id)
-    notifications.notify('info', 'A new description is being generated.')
+    notifications.notify(
+      'info',
+      'A new description is being generated. The file will be renamed to match.',
+    )
   } catch (e) {
     notifications.notify('error', e instanceof ApiError ? e.message : 'Request failed.')
   }
@@ -271,8 +279,20 @@ async function describeAgain(): Promise<void> {
           </section>
 
           <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+            <!-- Names made from descriptions are long: shown in full, wrapping after an underscore (<wbr>). -->
             <dt class="text-muted">File</dt>
-            <dd class="truncate" :title="photo.fileName">{{ photo.fileName }}</dd>
+            <dd class="wrap-anywhere">
+              <template v-for="(part, i) in nameParts(photo.fileName)" :key="i"
+                >{{ part }}<wbr
+              /></template>
+            </dd>
+            <template v-if="photo.originalFileName && photo.originalFileName !== photo.fileName"
+              ><dt class="text-muted">Original name</dt>
+              <dd class="wrap-anywhere">
+                <template v-for="(part, i) in nameParts(photo.originalFileName)" :key="i"
+                  >{{ part }}<wbr
+                /></template></dd
+            ></template>
             <template v-if="photo.takenAt"
               ><dt class="text-muted">Taken</dt>
               <dd>{{ formatDateTime(photo.takenAt) }}</dd></template
