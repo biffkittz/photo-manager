@@ -44,7 +44,7 @@ function tryAgain(): void {
 
 <template>
   <section
-    class="mx-auto mt-16 max-w-sm rounded-lg border border-border bg-surface p-8 text-center shadow-sm"
+    class="mx-auto mt-8 max-w-sm rounded-lg border border-border bg-surface p-6 sm:mt-16 sm:p-8 text-center shadow-sm"
   >
     <h1 data-page-title tabindex="-1" class="text-2xl font-bold">Photo Manager</h1>
     <p class="mt-2 text-sm text-muted">A private, encrypted family photo library.</p>
@@ -59,7 +59,7 @@ function tryAgain(): void {
       <p>Photo Manager could not be reached. Check your connection and try again.</p>
       <button
         type="button"
-        class="mt-2 rounded-md border border-border bg-surface px-3 py-1 font-medium text-text hover:bg-surface-muted"
+        class="mt-2 rounded-md border border-border bg-surface px-3 py-1 font-medium text-text hover:bg-surface-muted pointer-coarse:py-3"
         @click="tryAgain"
       >
         Try again
@@ -69,7 +69,7 @@ function tryAgain(): void {
     <template v-if="googleSignIn">
       <a
         :href="urls.googleLogin(returnUrl)"
-        class="mt-6 inline-flex w-full items-center justify-center rounded-md bg-brand px-4 py-2 font-medium text-on-brand hover:bg-brand-hover"
+        class="mt-6 inline-flex w-full items-center justify-center rounded-md bg-brand px-4 py-2 font-medium pointer-coarse:py-3 text-on-brand hover:bg-brand-hover"
       >
         Continue with Google
       </a>
@@ -78,7 +78,7 @@ function tryAgain(): void {
       </p>
       <a
         :href="urls.login(returnUrl)"
-        class="mt-4 inline-flex w-full items-center justify-center rounded-md border border-border bg-surface px-4 py-2 font-medium text-text hover:bg-surface-muted"
+        class="mt-4 inline-flex w-full items-center justify-center rounded-md border border-border bg-surface px-4 py-2 font-medium pointer-coarse:py-3 text-text hover:bg-surface-muted"
       >
         Sign in with GitHub
       </a>
@@ -86,7 +86,7 @@ function tryAgain(): void {
     <a
       v-else
       :href="urls.login(returnUrl)"
-      class="mt-6 inline-flex w-full items-center justify-center rounded-md bg-brand px-4 py-2 font-medium text-on-brand hover:bg-brand-hover"
+      class="mt-6 inline-flex w-full items-center justify-center rounded-md bg-brand px-4 py-2 font-medium pointer-coarse:py-3 text-on-brand hover:bg-brand-hover"
     >
       Sign in with GitHub
     </a>

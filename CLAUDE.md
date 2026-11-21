@@ -42,7 +42,7 @@ v1 plus the fixes of the 2026-11-19 and 2026-11-20 reviews is deployed at photo.
 Not committed yet: family members invited from the People page who sign in with Google (docs/adr/0012; members
 table with negative user ids; admins stay GitHub-only in Terraform); the Google OAuth client is not created yet
 (docs/operations.md, "Inviting family members"). Tests: backend 179 (Core 73, Worker 54, Api 46 running as the
-least-privileged web database role, Integration 6), frontend lint/format/types + 49 unit + 15 E2E. Terraform state uses the owner's existing account
+least-privileged web database role, Integration 6), frontend lint/format/types + 50 unit + 18 E2E (3 on a phone-sized touch screen). Terraform state uses the owner's existing account
 (`rg-terraform-state`/`demonstration`/`terraform`; CI limited to `photo.terraform.tfstate` by custom roles + ABAC;
 docs/adr/0009). Images go to the owner's existing registry `crloginappdemo7fyguj` (`rg-loginapp-demo`, shared with
 the login app; repositories `photo-*`; the app identities and their *AcrPull* live in `infra/bootstrap`;

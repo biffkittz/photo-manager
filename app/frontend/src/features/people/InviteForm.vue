@@ -59,7 +59,7 @@ const onSubmit = handleSubmit((values) => {
         :disabled="disabled"
         :aria-invalid="errors.name ? 'true' : 'false'"
         :aria-describedby="errors.name ? nameErrorId : undefined"
-        class="rounded-md border border-border bg-surface p-2 text-sm"
+        class="rounded-md border border-border bg-surface p-2 text-sm pointer-coarse:min-h-11 pointer-coarse:text-base"
       />
       <p v-if="errors.name" :id="nameErrorId" role="alert" class="text-sm text-danger">
         {{ errors.name }}
@@ -77,7 +77,7 @@ const onSubmit = handleSubmit((values) => {
         :disabled="disabled"
         :aria-invalid="errors.email ? 'true' : 'false'"
         :aria-describedby="errors.email ? `${emailHelpId} ${emailErrorId}` : emailHelpId"
-        class="rounded-md border border-border bg-surface p-2 text-sm"
+        class="rounded-md border border-border bg-surface p-2 text-sm pointer-coarse:min-h-11 pointer-coarse:text-base"
       />
       <p :id="emailHelpId" class="text-xs text-muted">
         Recommended. Only that Google account can then accept, even if the link reaches someone

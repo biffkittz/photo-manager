@@ -41,6 +41,13 @@
   }
 }
 
+/*
+ * `roomy:` screens are at least 640px wide AND tall. The photo viewer is framed (margins, rounded corners) only
+ * there; phones in either orientation get it full screen, so a landscape phone does not lose its few hundred
+ * pixels of height to the frame.
+ */
+@custom-variant roomy (@media (min-width: 40rem) and (min-height: 40rem));
+
 @theme inline {
   --color-bg: var(--pm-bg);
   --color-surface: var(--pm-surface);

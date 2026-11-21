@@ -32,6 +32,10 @@ feature components; `src/components` shared UI; `src/composables` reusable logic
   `script-src 'self'`; E2E fails on CSP violations); render model/user text with interpolation only.
 - Accessibility: semantic elements, labels for every control, visible focus, keyboard support for dialogs
   and the viewer, `aria-live` for async status.
+- Phones are first-class (`e2e/mobile.spec.ts`, 390px touch screen): no page may scroll sideways (wide tables
+  get a card layout below `sm`); touch screens get 44px tap targets and 16px text in inputs (iOS zooms into
+  smaller text) through `pointer-coarse:` (BaseButton does it); the photo viewer is full screen unless the screen
+  is `roomy:` (custom variant in `src/styles/main.css`) and swipes between photos.
 - Errors: user-facing notifications via the notifications store; no third-party error reporting
   (see `src/plugins/errorHandler.ts` and docs/operations.md#error-reporting).
 - Session end (sign-out, 401, a session check answering "signed out", or another tab, via the

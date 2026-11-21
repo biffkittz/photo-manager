@@ -36,7 +36,7 @@ async function copy(): Promise<void> {
         ref="input"
         :value="link"
         readonly
-        class="min-w-0 flex-1 rounded-md border border-border bg-surface p-2 font-mono text-xs"
+        class="min-w-0 flex-1 rounded-md border border-border bg-surface p-2 font-mono text-xs pointer-coarse:text-base"
         @focus="input?.select()"
       />
       <BaseButton variant="primary" @click="copy">Copy link</BaseButton>

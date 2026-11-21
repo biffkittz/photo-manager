@@ -15,8 +15,8 @@ const id = useId()
       type="search"
       maxlength="200"
       autocomplete="off"
-      placeholder="Search descriptions and filenames (e.g. beach sunset)"
-      class="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm placeholder:text-muted"
+      placeholder="Search descriptions and file names"
+      class="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm placeholder:text-muted pointer-coarse:min-h-11 pointer-coarse:text-base"
     />
   </div>
 </template>

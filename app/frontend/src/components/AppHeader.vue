@@ -23,40 +23,46 @@ async function signOut(): Promise<void> {
   }
 }
 
+// Phones: the links share the full width of their own row, below the name and Sign out (two rows instead of
+// three); touch screens get 44px tall tap targets.
 const linkClass =
-  'rounded-md px-3 py-2 text-sm font-medium text-muted hover:bg-surface-muted hover:text-text'
+  'block rounded-md px-3 py-2 text-center text-sm font-medium text-muted hover:bg-surface-muted hover:text-text pointer-coarse:py-3'
 const activeClass = 'bg-surface-muted !text-text'
 </script>
 
 <template>
   <header class="border-b border-border bg-surface">
-    <div class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3">
-      <RouterLink to="/gallery" class="text-lg font-semibold">Photo Manager</RouterLink>
-      <nav v-if="user" aria-label="Main">
+    <div
+      class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-2 sm:py-3"
+    >
+      <RouterLink to="/gallery" class="py-1 text-lg font-semibold pointer-coarse:py-2"
+        >Photo Manager</RouterLink
+      >
+      <nav v-if="user" aria-label="Main" class="order-last w-full sm:order-none sm:w-auto">
         <ul class="flex gap-1">
-          <li>
+          <li class="flex-1 sm:flex-none">
             <RouterLink to="/gallery" :class="linkClass" :active-class="activeClass"
               >Gallery</RouterLink
             >
           </li>
-          <li>
+          <li class="flex-1 sm:flex-none">
             <RouterLink to="/uploads" :class="linkClass" :active-class="activeClass"
               >Uploads</RouterLink
             >
           </li>
-          <li v-if="isAdmin">
+          <li v-if="isAdmin" class="flex-1 sm:flex-none">
             <RouterLink to="/actions" :class="linkClass" :active-class="activeClass"
               >Actions</RouterLink
             >
           </li>
-          <li v-if="isAdmin">
+          <li v-if="isAdmin" class="flex-1 sm:flex-none">
             <RouterLink to="/people" :class="linkClass" :active-class="activeClass"
               >People</RouterLink
             >
           </li>
         </ul>
       </nav>
-      <div v-if="user" class="flex items-center gap-3">
+      <div v-if="user" class="flex min-w-0 items-center gap-3">
         <img
           v-if="user.avatarUrl"
           :src="user.avatarUrl"
@@ -64,8 +70,14 @@ const activeClass = 'bg-surface-muted !text-text'
           class="size-8 rounded-full"
           referrerpolicy="no-referrer"
         />
-        <span class="text-sm">{{ displayName }}</span>
-        <button type="button" class="text-sm text-muted underline hover:text-text" @click="signOut">
+        <span class="max-w-32 truncate text-sm sm:max-w-48" :title="displayName">{{
+          displayName
+        }}</span>
+        <button
+          type="button"
+          class="shrink-0 text-sm text-muted underline hover:text-text pointer-coarse:px-1 pointer-coarse:py-3"
+          @click="signOut"
+        >
           Sign out
         </button>
       </div>

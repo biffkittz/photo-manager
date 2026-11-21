@@ -60,9 +60,16 @@ test('browses, searches and opens a photo with the keyboard', async ({ page }) =
   await expect(page.getByRole('list', { name: 'Photos' }).getByRole('listitem')).toHaveCount(2)
   await expectAccessible(page)
 
-  await page.getByRole('searchbox', { name: 'Search photos' }).fill('snow')
-  await expect(page).toHaveURL(/q=snow/)
+  const search = page.getByRole('searchbox', { name: 'Search photos' })
+  await search.fill('sno')
+  await expect(page).toHaveURL(/q=sno/)
   await expect(page.getByRole('list', { name: 'Photos' }).getByRole('listitem')).toHaveCount(1)
+  // The results arriving (and ?q= changing) must not take focus away: typing carries on.
+  await expect(search).toBeFocused()
+  await page.keyboard.type('w')
+  await expect(page).toHaveURL(/q=snow/)
+  await expect(search).toBeFocused()
+  await expect(search).toHaveValue('snow')
 
   await page.getByRole('button', { name: 'Open dog running in the snow' }).press('Enter')
   const dialog = page.getByRole('dialog', { name: 'dog running in the snow' })

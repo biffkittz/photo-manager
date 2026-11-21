@@ -107,8 +107,14 @@ router.afterEach(async (to, from) => {
   document.title = to.meta.title ? `${to.meta.title} · Photo Manager` : 'Photo Manager'
 
   // Move focus to the new page's heading so screen-reader and keyboard users land on the new content
-  // (opening/closing the photo viewer manages focus itself).
-  if (from.matched.length > 0 && to.name !== 'photo' && from.name !== 'photo') {
+  // (opening/closing the photo viewer manages focus itself). Not when only the query or hash changed on the
+  // same page: the gallery search writes ?q= as you type, and focus must stay in the search box.
+  if (
+    from.matched.length > 0 &&
+    to.path !== from.path &&
+    to.name !== 'photo' &&
+    from.name !== 'photo'
+  ) {
     await nextTick()
     document.querySelector<HTMLElement>('[data-page-title]')?.focus()
   }

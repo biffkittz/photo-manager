@@ -22,7 +22,40 @@ const tones: Record<JobStatus, 'neutral' | 'info' | 'success' | 'danger'> = {
 </script>
 
 <template>
-  <div class="overflow-x-auto">
+  <!-- Phones: one card per job (a six-column table does not fit). Wider screens: the table. -->
+  <ul class="flex flex-col gap-2 sm:hidden" aria-label="Recent maintenance jobs">
+    <li
+      v-for="job in jobs"
+      :key="job.id"
+      class="flex flex-col gap-2 rounded-md border border-border bg-surface p-3 text-sm"
+    >
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <p class="font-medium">{{ kindLabels[job.kind] }}</p>
+          <p v-if="job.summary" class="text-xs text-muted">{{ job.summary }}</p>
+        </div>
+        <StatusBadge :tone="tones[job.status]" :text="job.status" />
+      </div>
+      <div class="flex items-center justify-between gap-3">
+        <p class="text-muted">
+          {{ job.processed.toLocaleString() }} processed<span v-if="job.failed" class="text-danger">
+            ({{ job.failed }} failed)</span
+          >, started {{ formatDateTime(job.startedAt ?? job.createdAt) }} by
+          {{ job.requestedBy }}
+        </p>
+        <BaseButton
+          v-if="job.status === 'Running' || job.status === 'Queued'"
+          variant="ghost"
+          class="shrink-0"
+          :loading="cancelling === job.id"
+          :aria-label="`Cancel ${kindLabels[job.kind]}`"
+          @click="emit('cancel', job.id)"
+          >Cancel</BaseButton
+        >
+      </div>
+    </li>
+  </ul>
+  <div class="hidden overflow-x-auto sm:block">
     <table class="w-full text-left text-sm">
       <caption class="sr-only">
         Recent maintenance jobs

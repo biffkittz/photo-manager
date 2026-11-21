@@ -1,7 +1,12 @@
 <script setup lang="ts">
 /**
  * Photo viewer (nested route /gallery/photos/:id, so photos are deep-linkable). Shows the large preview,
- * metadata, description editing, AI re-description and original download. Left/right arrows navigate.
+ * metadata, description editing, AI re-description and original download. Left/right arrow keys, the
+ * Previous/Next buttons and, on touch screens, swiping the photo go to the previous/next photo.
+ *
+ * Layout: on phones and tablets the photo spans the width at its own aspect ratio (at most 70% of the screen
+ * height) with the details below it, scrolling together, so the two can never overlap. On large screens they sit
+ * side by side and the photo is fitted into its box.
  */
 import {
   computed,
@@ -108,6 +113,32 @@ function onKeydown(event: KeyboardEvent): void {
 onMounted(() => document.addEventListener('keydown', onKeydown))
 onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
 
+// A mostly horizontal one-finger swipe on the photo goes to the next (swipe left) or previous (swipe right)
+// photo. Pinching (two fingers) and panning a page the user has zoomed into are left to the browser.
+const SWIPE_DISTANCE = 50
+let swipeStart: { x: number; y: number } | null = null
+
+function onTouchStart(event: TouchEvent): void {
+  const touch = event.touches[0]
+  swipeStart =
+    event.touches.length === 1 && touch && (window.visualViewport?.scale ?? 1) <= 1
+      ? { x: touch.clientX, y: touch.clientY }
+      : null
+}
+
+function onTouchEnd(event: TouchEvent): void {
+  const touch = event.changedTouches[0]
+  const start = swipeStart
+  swipeStart = null
+  if (!start || !touch || editing.value) return
+
+  const dx = touch.clientX - start.x
+  const dy = touch.clientY - start.y
+  if (Math.abs(dx) >= SWIPE_DISTANCE && Math.abs(dx) > 2 * Math.abs(dy)) {
+    go(dx < 0 ? nextId.value : previousId.value)
+  }
+}
+
 async function save(description: string): Promise<void> {
   try {
     await updateDescription.mutateAsync({ id: props.id, description })
@@ -134,8 +165,8 @@ async function describeAgain(): Promise<void> {
     :title="photo?.description || photo?.fileName || 'Photo'"
     size="full"
   >
-    <div class="flex h-full flex-col gap-4 lg:flex-row">
-      <div v-if="isPending" class="flex flex-1 items-center justify-center">
+    <div class="flex flex-col gap-4 lg:h-full lg:flex-row">
+      <div v-if="isPending" class="flex min-h-48 flex-1 items-center justify-center">
         <BaseSpinner label="Loading photo" />
       </div>
       <ErrorAlert
@@ -145,12 +176,18 @@ async function describeAgain(): Promise<void> {
         @retry="refetch()"
       />
       <template v-else-if="photo">
-        <div class="flex min-h-64 flex-1 items-center justify-center rounded-md bg-black">
+        <!-- Edge to edge when the dialog is full screen (anything not `roomy`, see src/styles/main.css). -->
+        <div
+          class="relative -mx-4 -mt-4 flex min-h-48 touch-pan-y touch-pinch-zoom items-center justify-center bg-black roomy:mx-0 roomy:mt-0 roomy:rounded-md lg:mr-0 lg:min-h-0 lg:flex-1"
+          @touchstart.passive="onTouchStart"
+          @touchend.passive="onTouchEnd"
+          @touchcancel.passive="swipeStart = null"
+        >
           <img
             v-if="previewStatus === 'ready'"
             :src="previewUrl"
             :alt="photo.description || `Photo ${photo.fileName}`"
-            class="max-h-[75vh] max-w-full object-contain"
+            class="block max-h-[70dvh] max-w-full object-contain lg:absolute lg:inset-0 lg:size-full lg:max-h-none"
             @error="handleImageError"
           />
           <p v-else class="p-6 text-sm text-white">
@@ -158,7 +195,10 @@ async function describeAgain(): Promise<void> {
           </p>
         </div>
 
-        <aside class="flex w-full flex-col gap-4 lg:w-80" aria-label="Photo details">
+        <aside
+          class="flex w-full flex-col gap-4 lg:w-80 lg:shrink-0 lg:overflow-y-auto"
+          aria-label="Photo details"
+        >
           <section>
             <EditDescriptionForm
               v-if="editing"
@@ -228,8 +268,12 @@ async function describeAgain(): Promise<void> {
       </template>
     </div>
     <template #footer>
-      <BaseButton :disabled="!previousId" @click="go(previousId)">Previous</BaseButton>
-      <BaseButton :disabled="!nextId" @click="go(nextId)">Next</BaseButton>
+      <BaseButton class="flex-1 sm:flex-none" :disabled="!previousId" @click="go(previousId)"
+        >Previous</BaseButton
+      >
+      <BaseButton class="flex-1 sm:flex-none" :disabled="!nextId" @click="go(nextId)"
+        >Next</BaseButton
+      >
     </template>
   </ModalDialog>
 </template>

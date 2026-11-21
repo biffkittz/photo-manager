@@ -45,15 +45,18 @@ const alt = computed(() => props.photo.description || `Photo ${props.photo.fileN
       {{ caption }}
       <span class="block text-muted">{{ formatDate(photo.takenAt ?? photo.uploadedAt) }}</span>
     </figcaption>
-    <label
-      class="absolute top-2 left-2 rounded bg-surface/90 p-1 opacity-80 group-hover:opacity-100 focus-within:opacity-100"
-    >
-      <input
-        type="checkbox"
-        :checked="selected"
-        class="size-4"
-        @change="emit('toggle', photo.id)"
-      />
+    <!-- The label is the tap area (40px, 44px on touch screens); the visible box stays small. -->
+    <label class="group/select absolute top-0 left-0 flex p-2 pointer-coarse:p-1.5">
+      <span
+        class="flex rounded bg-surface/90 p-1 opacity-80 group-hover:opacity-100 group-focus-within/select:opacity-100 pointer-coarse:p-1.5"
+      >
+        <input
+          type="checkbox"
+          :checked="selected"
+          class="size-4 pointer-coarse:size-5"
+          @change="emit('toggle', photo.id)"
+        />
+      </span>
       <span class="sr-only">Select {{ caption }}</span>
     </label>
   </figure>

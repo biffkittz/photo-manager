@@ -40,7 +40,7 @@ onMounted(async () => {
 
 <template>
   <section
-    class="mx-auto mt-16 max-w-md rounded-lg border border-border bg-surface p-8 text-center shadow-sm"
+    class="mx-auto mt-8 max-w-md rounded-lg border border-border bg-surface p-6 sm:mt-16 sm:p-8 text-center shadow-sm"
     aria-live="polite"
   >
     <h1 data-page-title tabindex="-1" class="text-2xl font-bold">Photo Manager</h1>
@@ -62,7 +62,7 @@ onMounted(async () => {
       <!-- A full-page navigation: the sign-in goes through Google and comes back here. -->
       <a
         :href="continueUrl"
-        class="mt-6 inline-flex w-full items-center justify-center rounded-md bg-brand px-4 py-2 font-medium text-on-brand hover:bg-brand-hover"
+        class="mt-6 inline-flex w-full items-center justify-center rounded-md bg-brand px-4 py-2 font-medium pointer-coarse:py-3 text-on-brand hover:bg-brand-hover"
       >
         Continue with Google
       </a>

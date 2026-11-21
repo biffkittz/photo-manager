@@ -62,14 +62,15 @@ function open(id: string): void {
 </script>
 
 <template>
-  <section>
+  <!-- On phones the selection bar is pinned to the bottom of the screen; the padding keeps it off the last row. -->
+  <section :class="{ 'max-sm:pb-20': selected.size > 0 }">
     <PageHeader title="Gallery">
       <template #actions>
         <label class="sr-only" for="gallery-sort">Sort photos</label>
         <select
           id="gallery-sort"
           v-model="sort"
-          class="rounded-md border border-border bg-surface px-2 py-2 text-sm"
+          class="rounded-md border border-border bg-surface px-2 py-2 text-sm pointer-coarse:min-h-11 pointer-coarse:text-base"
         >
           <option v-for="option in sortOptions" :key="option.value" :value="option.value">
             {{ option.label }}
@@ -85,11 +86,11 @@ function open(id: string): void {
       <SearchBar v-model="search" />
       <div
         v-if="selected.size > 0"
-        class="flex items-center gap-2"
+        class="flex items-center gap-2 max-sm:fixed max-sm:inset-x-0 max-sm:bottom-0 max-sm:z-30 max-sm:border-t max-sm:border-border max-sm:bg-surface max-sm:px-4 max-sm:py-3 max-sm:shadow-lg"
         role="region"
         aria-label="Selection"
       >
-        <span class="text-sm">{{ selected.size }} selected</span>
+        <span class="text-sm max-sm:mr-auto">{{ selected.size }} selected</span>
         <BaseButton
           variant="primary"
           :loading="downloadState === 'preparing'"

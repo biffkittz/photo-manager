@@ -40,11 +40,11 @@ const onSubmit = handleSubmit((values) => emit('save', values.description))
       v-model="description"
       v-bind="descriptionAttrs"
       v-autofocus
-      rows="3"
+      rows="4"
       maxlength="320"
       :aria-invalid="errors.description ? 'true' : 'false'"
       :aria-describedby="errors.description ? errorId : undefined"
-      class="rounded-md border border-border bg-surface p-2 text-sm"
+      class="rounded-md border border-border bg-surface p-2 text-sm pointer-coarse:text-base"
     />
     <p v-if="errors.description" :id="errorId" role="alert" class="text-sm text-danger">
       {{ errors.description }}
